@@ -47,3 +47,11 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+Thesissen MiM 2015/
+
+*.pdf
+*.toc
+*.out
+*.aux
+*.png

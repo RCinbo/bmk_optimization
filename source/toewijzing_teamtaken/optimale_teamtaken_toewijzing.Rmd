@@ -1,0 +1,201 @@
+---
+title: "Optimale teamtaken toewijzing"
+author: "Raïsa Carmen"
+date: "`r Sys.Date()`"
+output: 
+  bookdown::pdf_book:
+    toc: false
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(rprojroot)
+library(googledrive)
+library(readxl)
+library(patchwork)
+library(kableExtra)
+library(ompr)
+library(latex2exp)
+
+knitr::opts_chunk$set(echo = TRUE)
+gewicht_geen_top <- 100
+gewicht_afwijking_tijdsinvestering <- 2
+N <- 99999
+bron <- find_root_file("data", "test.xlsx",
+                       criterion = has_file("BMK_optimization.Rproj"))
+data_taken <- readxl::read_excel(path = bron,
+                                 sheet = "taken")
+data_tijd <- readxl::read_excel(path = bron,
+                                 sheet = "tijdsinvesteringen")
+data_voorkeur <- readxl::read_excel(path = bron,
+                                 sheet = "voorkeuren")
+nb_tasks <- nrow(data_taken)
+nb_team <- nrow(data_tijd)
+w <- as.matrix(data_voorkeur[, -1])
+w[is.na(w)] <- gewicht_geen_top
+t <- as.numeric(unlist(data_taken$tijdsinvestering))
+n <- as.numeric(unlist(data_taken$personen))
+t_accent <- sum(t*n) / sum(data_tijd$tijdsinvestering) *
+  as.numeric(unlist(data_tijd$tijdsinvestering))
+```
+
+# Inleiding
+
+In dit document worden de resultaten gepresenteerd van een BMK oefening waar alle teamtaken worden herverdeeld onder de teamleden gezien er de afgelopen jaren enkele nieuwe medewerkers bij het team zijn aangesloten. We starten met een schone lei. 
+
+# Data overzicht
+
+Allereerst wordt er een lijst gemaakt van alle taken die momenteel door teamleden opgenomen worden. Voor iedere taak wordt ook een inschatting gemaakt van de gemiddelde tijdsinvestering (in dagen per jaar) en het aantal medewerkers die deze taak kunnen (moeten) opnemen. Bij dit aantal personen worden geen backups meegerekend. Tabel \@ref(tab:taken) toont een overzicht van alle taken die door de teamleden moeten opgenomen worden.
+
+```{r taken, echo=FALSE}
+data_taken %>%
+  kable("latex",
+        booktabs = T,
+        caption = "Overzicht van de taken",
+        col.names = c("taak $i$", "beschrijving", "tijdsinvestering $t_i$", "personen $n_i$"),
+        escape = FALSE) %>%
+  kableExtra::kable_styling()
+```
+
+Ieder van de medewerkers geeft ook een top `r max(data_voorkeur[, -1], na.rm=TRUE)` door van zijn favoriete taken. Tabel \@ref(tab:voorkeur) toont de voorkeuren voor ieder van de taken. Ten slot laat het model toe dat sommige mensen minder tijd investeren in teamtaken dan anderen (bijvoorbeeld indien zij niet voltijds werken; zie laatste rij van Tabel \@ref(tab:voorkeur)).
+
+```{r voorkeur, echo=FALSE}
+data_voorkeur %>% 
+  rbind(c("$f_j$", data_tijd$tijdsinvestering)) %>%
+  replace(is.na(.), "") %>%
+  kable(
+    "latex",
+    booktabs = T,
+    caption = "Overzicht van de voorkeuren  en tijdsinvestering per persoon",
+    col.names = c("$w_{ij}$", colnames(data_voorkeur)[-1]),
+    escape = FALSE) %>%
+  kableExtra::kable_styling() %>%
+  row_spec(nrow(data_voorkeur), hline_after = TRUE) %>%
+  add_header_above(header = c("" , "Teamlid" = ncol(data_voorkeur) - 1))
+```
+\clearpage
+# Methodologie
+
+Voor de optimalisatie wordt een mixed integer program (MIP) opgesteld (zie formulering \@ref(eq:ip-formulering)) en geoptimaliseerd met behulp van het *ompr* package.
+
+De formulering van het MIP is als volgt: 
+
+\begin{equation} 
+\begin{aligned}
+min & \sum_{i, j}(w_{ij} * x_{ij}) + \sum_{j}(p_t * s^{-}_{j}) + \sum_{j}(p_t * s^{+}_{j})\\
+s.t. & \\
+ & \sum_j x_{ij} >= n_i &\forall i\\
+ & t^{'}_{j} - \sum_i(t_i * x_{ij})  \leq s^{+}_{j} & \forall j\\
+ & \sum_i(t_i * x_{ij}) - t^{'}_{j} \leq  s^{-}_{j} & \forall j\\
+ & x_{ij} \in \{0, 1\} & \forall i,j\\
+ & s^{+}_{j}, s^{-}_{j} \in \mathbb{R}^{+} & \forall j
+\end{aligned}
+(\#eq:ip-formulering)
+\end{equation} 
+
+Het MIP gebruikt de volgende parameters:
+
+- De gewichten $w_{ij}$ weerspiegelen de voorkeuren van de teamleden. Indien taak $i$ de favoriete taak is van teamlid $j$, dan is $w_{ij} = 1$. De `r max(data_voorkeur[, -1], na.rm=TRUE)`de favoriete taak van teamlid $j$ krijgt gewicht $w_{ij}=$ `r max(data_voorkeur[, -1], na.rm=TRUE)`. Alle taken die niet in de top `r max(data_voorkeur[, -1], na.rm=TRUE)` staan, krijgen gewicht `r gewicht_geen_top`. 
+- $t_i$ is het geschatte aantal dagen die per jaar nodig zijn om taak $i$ uit te voeren.
+- $n_i$ is het aantal personen die ingezet moeten worden voor taak $i$. We gaan er van uit dat ieder van deze personen even veel tijd moeten spenderen aan de taak ($t_i$)
+- $t^{'}_{j}$ is het aantal dagen dat teamlid $j$ aan teamtaken zou moeten spenderen per jaar. Dit wordt berekent met de formule $t'_j = f_j * \frac{\sum_i(t_i*n_i)}{\sum_j f_j}$.
+- $p_t$ is de kost die verbonden is aan iedere dag per jaar dat een teamlid meer of minder moet spenderen aan teamtaken dan hij in principe zou moeten spenderen ($t^{'}_{j}$). Deze parameter kan vrij gekozen worden om de afweging die gemaakt wordt tussen voorkeuren en afwijkingen in de totale tijdsbesteding van een teamlid bij te stellen. Momenteel is deze parameter gelijk aan `r gewicht_afwijking_tijdsinvestering`. Een toewijzing van een taak die 2de gerangschikt staat in plaats van 1ste weegt dus even zwaar door in de doelfunctie als `r 1/gewicht_afwijking_tijdsinvestering` `r ifelse(1/gewicht_afwijking_tijdsinvestering>1, "dagen", "dag")` meer of minder werk dan gepland voor een teamlid.
+
+In het MIP zijn $x_{ij}$, $s^{-}_{j}$, en $s^{+}_{j}$ de beslissingsvariabelen: 
+
+- $x_{ij}$ is een binaire variabele en kan dus enkel waarde 0 of 1 aannemen. $x_{ij}$ is gelijk aan 1 indien taak $i$ door teamlid $j$ zal worden gedaan. Anders is $x_{ij}$ gelijk aan 0.
+- Aangezien de taken niet oneindig deelbaar zijn, is het onvermijdelijk dat sommige teamleden een beetje meer of minder tijd spenderen aan teamtaken. We willen echter dat dit verschil zo klein mogelijk gehouden wordt voor een eerlijke verdeling van de taken. $s^{+}_{j}$ en $s^{-}_{j}$ zijn zo genaamde *slack* variabelen die er voor zorgen dat de absolute waarde van het verschil tussen de tijdsinvestering die teamlid $j$ zou moeten doen bij een eerlijke verdeling ($t^{'}_{j}$) enerzijds en de werkelijke tijdsinvestering bij een bepaalde toewijzing ($\sum_i(t_i * x_{ij})$) anderzijds bestraft wordt met een *penalty* $p_t$. Aangezien de absolute waarde geen lineaire functie is van de beslissingsvariabelen, mag deze niet gebruikt worden in een MIP. Daarom gebruiken we de slack variabelen $s^{+}_{j}$ en $s^{-}_{j}$. Indien teamlid $j$ meer dan $t'_{j}$ dagen spendeert aan teamtaken, zal $\sum_i(t_i * x_{ij}) > t'_{j}$ en dus $s^{+}_{j} = 0$ en $s^{-}_{j} = \sum_i(t_i * x_{ij}) - t'{j}$. Indien teamlid $j$ minder dan $t'_{j}$ dagen spendeert aan teamtaken, zal $\sum_i(t_i * x_{ij}) < t'_{j}$ en dus $s^{+}_{j} = t'{j} - \sum_i(t_i * x_{ij})$ en $s^{-}_{j} = 0$.
+ 
+
+De doelfunctie minimaliseert de som van de rankings van de toegewezen taken en $p_t$ keer de som over alle teamleden van de absolute waarde van het verschil tussen de geplande tijd voor teamtaken ($\sum_i(t_i * x_{ij})$) en $t^{'}_{j}$.
+
+
+
+```{r optimalisatie, include = FALSE, eval = TRUE, echo = FALSE}
+#https://www.or-as.be/blog/absolute_value_lp
+#https://www.r-orms.org/mixed-integer-linear-programming/packages/modelling-milp/
+model <- MIPModel() %>% 
+  add_variable(x[i, j], i = 1:nb_tasks, j = 1:nb_team, type = "binary") %>% 
+  add_variable(s_min[j], j = 1:nb_team, type = "continuous", lb = 0) %>% 
+  add_variable(s_plus[j], j = 1:nb_team, type = "continuous", lb = 0) %>% 
+  set_objective(sum_expr(w[i, j] * x[i, j], i = 1:nb_tasks, j = 1:nb_team) +
+                  gewicht_afwijking_tijdsinvestering * sum_expr(s_min[j],
+                         j = 1:nb_team) +
+                  gewicht_afwijking_tijdsinvestering * sum_expr(s_plus[j],
+                           j = 1:nb_team),
+                sense = "min") %>% 
+  add_constraint(sum_expr(x[i, j], j = 1:nb_team) >= n[i], i = 1:nb_tasks) %>% 
+  add_constraint(t_accent[j] - sum_expr(t[i] * x[i, j], i = 1:nb_tasks)
+                 <= s_plus[j], j = 1:nb_team) %>% 
+  add_constraint(sum_expr(t[i] * x[i, j], i = 1:nb_tasks) - t_accent[j]
+                 <= s_min[j], j = 1:nb_team)
+library(ROI)
+library(ROI.plugin.glpk)
+library(ompr.roi)
+```
+
+```{r optimalisatiesimpler, include = FALSE, eval = FALSE, echo = FALSE}
+#https://www.or-as.be/blog/absolute_value_lp
+#https://www.r-orms.org/mixed-integer-linear-programming/packages/modelling-milp/
+model_simpler <- MIPModel() %>% 
+  add_variable(x[i, j], i = 1:nb_tasks, j = 1:nb_team, type = "binary") %>% 
+  set_objective(sum_expr(w[i, j] * x[i, j], i = 1:nb_tasks, j = 1:nb_team), 
+                sense = "min") %>% 
+  add_constraint(sum_expr(x[i, j], j = 1:nb_team) >= n[i], i = 1:nb_tasks)
+library(ROI)
+library(ROI.plugin.glpk)
+library(ompr.roi)
+```
+
+# Resultaten
+
+## Een startoplossing
+
+In deze sectie beschrijven we de startoplossing. Deze oplossing is optimaal in het MIP model (formulering \@ref(eq:ip-formulering)). Hoewel de oplossing optimaal is, is het mogelijk dat er toch een onevenwicht is dat bijgesteld moet worden. Een voorbeeld is dat bijna iedereen zijn 1ste en 2de keuze heeft, behalve één teamlid dat enkel taken toegewezen kreeg die niet in zijn top `r max(data_voorkeur[, -1], na.rm=TRUE)` stonden. Een gebalanceerdere oplossing kan dan eventueel gezocht worden door extra beperkingen toe te voegen.
+
+```{r echo=FALSE, warning = FALSE, include = FALSE}
+result <- model %>% 
+  solve_model(with_ROI("glpk", verbose = TRUE))
+id <- "begin"
+```
+
+```{r echo=FALSE, results='asis'}
+cat(
+  knitr::knit(text = knitr::knit_expand('_MIP_resultaat.Rmd', envir = environment(), quiet = TRUE), quiet = TRUE
+  ))
+```
+
+\clearpage
+
+## Een betere oplossing?
+
+De huidige oplossing, hoewel optimaal op team-niveau, is nadelig voor teamlid 6. Hij is om te beginnen de enige is die een taak zal moeten uitvoeren die niet in zijn top `r max(data_voorkeur[, -1], na.rm=TRUE)` staat. Daarenboven is hij de enige die net iets meer tijd zal spenderen aan teamtaken dan een eerlijke verdeling zou voorschrijven.
+We kunnen nu enkele extra beperkingen op maat toevoegen die de startoplossing uitsluiten. Op die manier, verplichten we het MIP naar een alternatieve oplossing te zoeken. Er zijn verschillende mogelijkheden:
+
+- We kunnen de beperking $s^-_6<0.46$ toevoegen om op te leggen dat teamlid 6 minder tijd spendeert aan teamtaken.
+- We kunnen een nieuwe kost parameter introduceren, $p_{t2}$,  die er voor zorgt dat een afwijking van een eerlijk tijdsspendering groter dan $x$ (bijvoorbeeld 0.3) aan teamtaken extra duur wordt.
+- We kunnen de beperking $x_{56} = 0$ toevoegen om op te leggen dat teamlid 6 taak 5 niet mag uitvoeren.
+
+De resultaten hieronder beschrijven de resultaten waarbij $s^-_6<0.46$ toegevoegd wordt aan het model.
+
+```{r echo=FALSE, warning = FALSE, include = FALSE}
+result <- model %>% 
+  add_constraint(s_min[j] <= 0.46, j = 6) %>%
+  #add_constraint(x[i, j] == 0, i = 5, j = 6) %>%
+  solve_model(with_ROI("glpk", verbose = TRUE))
+id <- "alternatief"
+```
+
+```{r echo=FALSE, results='asis'}
+cat(
+  knitr::knit(text = knitr::knit_expand('_MIP_resultaat.Rmd', envir = environment(), quiet = TRUE), quiet = TRUE
+  ))
+```
+
+### Bespreking
+
+We zien dat teamlid 1 nu de pineut is: hij moet taak 5 opnemen (die slechts 1 persoon in zijn top had staan) en moet ook nog eens meer tijd investeren in teamtaken dan een eerlijke verdeling zou voorschrijven. Bovendien zien we nu grotere afwijkingen van een eerlijke tijdsinvestering in teamtaken dan in de startoplossing.
+
+# Conclusie
+
+Een MIP kan aangewend worden om snel een goede oplossing aan te bieden die optimaal is op teamniveau. Er kan gesleuteld worden aan de oplossing door nieuwe beperkingen toe te voegen maar dat geeft nooit een garantie op een betere oplossing.

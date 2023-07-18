@@ -20,6 +20,8 @@ library(latex2exp)
 knitr::opts_chunk$set(echo = TRUE)
 gewicht_geen_top <- 100
 gewicht_afwijking_tijdsinvestering <- 0.5
+gewicht_interactie <- data.frame(relatie = c(1, 2, 3),
+                                 kost = c(-0.5, -2, -5)) #moet negatief zijn; indien een persoon twee taken die bij elkaar passen doet, krijg je deze 'korting'
 N <- 99999
 inbo_medewerker <- "teamcharter" # taak die door een inbo teamlid MOET 
                   # uitgevoerd worden. NA indien er zo geen taak is
@@ -34,7 +36,21 @@ data_tijd <- readxl::read_excel(path = bron,
 data_voorkeur <- readxl::read_excel(path = bron,
                                  sheet = "voorkeuren")
 data_interactie <- readxl::read_excel(path = bron,
-                                 sheet = "interactie_taken")
+                                 sheet = "interactie_taken") %>%
+  dplyr::select(1:3) %>%
+  dplyr::filter(!is.na(relatie)) %>%
+  left_join(data_taken %>% dplyr::select(1:2),
+            by = join_by(taak_1_beschrijving == beschrijving)) %>%
+  rename(taak_1_nr = taak) %>%
+  left_join(data_taken %>% dplyr::select(1:2),
+            by = join_by(taak_2_beschrijving == beschrijving)) %>%
+  rename(taak_2_nr = taak) %>%
+  left_join(gewicht_interactie)
+data_mag_niet <- data_interactie %>%
+  dplyr::filter(relatie == -1)
+data_interactie <- data_interactie %>%
+  dplyr::filter(relatie != -1)
+nb_interactie <- nrow(data_interactie)
 nb_tasks <- nrow(data_taken)
 nb_team <- nrow(data_tijd)
 evinbo <-  as.numeric(unlist(data_tijd$EVINBO))
@@ -44,6 +60,7 @@ t <- as.numeric(unlist(data_taken$tijdsinvestering))
 n <- as.numeric(unlist(data_taken$personen))
 t_accent <- sum(t*n) / sum(data_tijd$tijdsinvestering) *
   as.numeric(unlist(data_tijd$tijdsinvestering))
+p_r <- as.numeric(unlist(data_interactie$kost))
 ```
 
 # Inleiding
@@ -93,15 +110,19 @@ De formulering van het MIP is als volgt:
 
 \begin{equation} 
 \begin{aligned}
-min & \sum_{i, j}(w_{ij} * x_{ij}) + p_t * \sum_{j}(s^{-}_{j} +  s^{+}_{j})\\
+min & \sum_{i, j}(w_{ij} * x_{ij}) + p_t * \sum_{j}(s^{-}_{j} +  s^{+}_{j}) + \sum_{r}(p_r * y_r)\\
 s.t. & \\
  & \sum_j x_{ij} >= n_i &\forall i\\
  & t^{'}_{j} - \sum_i(t_i * x_{ij})  \leq s^{+}_{j} & \forall j\\
  & \sum_i(t_i * x_{ij}) - t^{'}_{j} \leq  s^{-}_{j} & \forall j\\
- & \sum_{j \in \Lambda_I} x_{ij} >= n_i &\forall i \in \Theta_I\\
- & \sum_{j \in \Lambda_E} x_{ij} >= n_i &\forall i \in \Theta_E\\
- & x_{i\in f(j), j} == 1 &\forall j\\
- & x_{ij} \in \{0, 1\} & \forall i,j\\
+ & \sum_{j \in \Lambda_I} x_{ij} \geq n_i &\forall i \in \Theta_I\\
+ & \sum_{j \in \Lambda_E} x_{ij} \geq n_i &\forall i \in \Theta_E\\
+ & x_{i\in f(j), j} = 1 &\forall j\\
+ & x_{i_1, j} \leq 1 -  x_{i_1, j} &\forall j, \forall i_1, i_2 \in \Phi_{-1}\\
+ & y_r \geq - 1 + x_{i_1, j} + x_{i_2, j} &\forall j, \forall r, i_1, i_2 \in \Phi_{+}\\
+ & y_r \leq x_{i_1, j} &\forall j, \forall r, i_1 \in \Phi_{+}\\
+ & y_r \leq x_{i_2, j} &\forall j, \forall r, i_2 \in \Phi_{+}\\\\
+ & x_{ij}, y_r \in \{0, 1\} & \forall i, j, r\\
  & s^{+}_{j}, s^{-}_{j} \in \mathbb{R}^{+} & \forall j
 \end{aligned}
 (\#eq:ip-formulering)
@@ -114,17 +135,26 @@ Het MIP gebruikt de volgende parameters:
 - $n_i$ is het aantal personen dat ingezet moet worden voor taak $i$. We gaan er van uit dat ieder van deze personen even veel tijd moeten spenderen aan de taak ($t_i$)
 - $t^{'}_{j}$ is het aantal dagen dat teamlid $j$ aan teamtaken zou moeten spenderen per jaar. Dit wordt berekent met de formule $t'_j = f_j * \frac{\sum_i(t_i*n_i)}{\sum_j f_j}$.
 - $p_t$ is de kost die verbonden is aan iedere dag per jaar dat een teamlid meer of minder moet spenderen aan teamtaken dan hij in principe zou moeten spenderen ($t^{'}_{j}$). Deze parameter kan vrij gekozen worden om de afweging die gemaakt wordt tussen voorkeuren en afwijkingen in de totale tijdsbesteding van een teamlid bij te stellen. Momenteel is deze parameter gelijk aan `r gewicht_afwijking_tijdsinvestering`. Een toewijzing van een taak die 2de gerangschikt staat in plaats van 1ste weegt dus even zwaar door in de doelfunctie als `r 1/gewicht_afwijking_tijdsinvestering` `r ifelse(1/gewicht_afwijking_tijdsinvestering>1, "dagen", "dag")` meer of minder werk dan gepland voor een teamlid.
+<!-- - $r_p$ is de waarde van de relatie tussen twee taken $i_1$ en $i_2$. Mogelijke waardes zijn 1, 2, of 3. -->
+- $p_{r}$ is een negatieve kost; het is de bonus die verbonden is aan het toewijzen van taak $i_1$ en $i_2$ aan dezelfde persoon $j$ indien de waarde van de relatie tussen de taken groter dan 0 is.
+<!-- - $p_{r2}$ is een negatieve kost; het is de bonus die verbonden is aan het toewijzen van taak $i_1$ en $i_2$ aan dezelfde persoon $j$ indien de waarde van de relatie tussen de taken 2 is.  -->
+<!-- - $p_{r3}$ is een negatieve kost; het is de bonus die verbonden is aan het toewijzen van taak $i_1$ en $i_2$ aan dezelfde persoon $j$ indien de waarde van de relatie tussen de taken 3 is.  -->
 - $\Theta_{I}$ en $\Theta_E$ zijn de verzameling van taken die respectievelijk door een INBO of EVINBO teamlid moeten uitgevoerd worden. $\Lambda_I$ en $\Lambda_E$ zijn de teamleden die respectievelijk INBO en EVINBO werknemers zijn. 
+- $\Phi_{-1}$ is de verzameling van paren van taken die niet aan dezelfde persoon mogen toegewezen worden.
+- $\Phi_{+}$ is de verzameling van paren van taken die bij voorkeur aan dezelfde persoon toegewezen worden (ze hebben een positieve relatie).
 
-
-In het MIP zijn $x_{ij}$, $s^{-}_{j}$, en $s^{+}_{j}$ de beslissingsvariabelen: 
+In het MIP zijn $x_{ij}$, $s^{-}_{j}$, $s^{+}_{j}$, en $y_{rj}$ de beslissingsvariabelen: 
 
 - $x_{ij}$ is een binaire variabele en kan dus enkel waarde 0 of 1 aannemen. $x_{ij}$ is gelijk aan 1 indien taak $i$ door teamlid $j$ zal worden gedaan. Anders is $x_{ij}$ gelijk aan 0.
 - Aangezien de taken niet oneindig deelbaar zijn, is het onvermijdelijk dat sommige teamleden een beetje meer of minder tijd spenderen aan teamtaken. We willen echter dat dit verschil zo klein mogelijk gehouden wordt voor een eerlijke verdeling van de taken. $s^{+}_{j}$ en $s^{-}_{j}$ zijn zo genaamde *slack* variabelen die er voor zorgen dat de absolute waarde van het verschil tussen de tijdsinvestering die teamlid $j$ zou moeten doen bij een eerlijke verdeling ($t^{'}_{j}$) enerzijds en de werkelijke tijdsinvestering bij een bepaalde toewijzing ($\sum_i(t_i * x_{ij})$) anderzijds bestraft wordt met een *penalty* $p_t$. Aangezien de absolute waarde geen lineaire functie is van de beslissingsvariabelen, mag deze niet gebruikt worden in een MIP. Daarom gebruiken we de slack variabelen $s^{+}_{j}$ en $s^{-}_{j}$. Indien teamlid $j$ meer dan $t'_{j}$ dagen spendeert aan teamtaken, zal $\sum_i(t_i * x_{ij}) > t'_{j}$ en dus $s^{+}_{j} = 0$ en $s^{-}_{j} = \sum_i(t_i * x_{ij}) - t'{j}$. Indien teamlid $j$ minder dan $t'_{j}$ dagen spendeert aan teamtaken, zal $\sum_i(t_i * x_{ij}) < t'_{j}$ en dus $s^{+}_{j} = t'{j} - \sum_i(t_i * x_{ij})$ en $s^{-}_{j} = 0$.
-- De vierde en vijfde beperking zorgen er voor dat de taken die door een (EV)INBO werknemer moeten uitgevoerd worden ook aan een  (EV)INBO werknemer worden toegewezen. 
--De zesde beperking zorgt er voor dat teamleden hun favoriete taak kunnen houden. (met $f(j)$ de favoriete ta(a)k(en) van teamlid $j$)
+- $y_{rj}$ een binaire beslissingsvariable. $r$ stelt alle paren van taken voor $i_1$ en $i_2$ waar tussen een positieve relatie bestaat (mogelijke waardes zijn 1, 2, of 3). Deze taken worden best aan dezelfde persoon toegewezen omdat er een synergie bestaat tussen de taken. $y_{rj}=1$ indien het paar van taken $r$ aan dezelfde persoon $j$ worden toegewezen en anders 0.   
+
 
 De doelfunctie minimaliseert de som van de rankings van de toegewezen taken en $p_t$ keer de som over alle teamleden van de absolute waarde van het verschil tussen de geplande tijd voor teamtaken ($\sum_i(t_i * x_{ij})$) en $t^{'}_{j}$.
+De vierde en vijfde beperking zorgen er voor dat de taken die door een (EV)INBO werknemer moeten uitgevoerd worden ook aan een  (EV)INBO werknemer worden toegewezen. 
+De zesde beperking zorgt er voor dat teamleden hun favoriete taak kunnen houden. (met $f(j)$ de favoriete ta(a)k(en) van teamlid $j$).
+De zevende beperking zorgt er voor dat taken die niet door dezelfde persoon mogen uitgevoerd worden niet aan dezelfde persoon worden toegewezen. 
+De achtste, negende en tiende beperking zorgen er voor dat $y_{rj}$ gelijk is aan 1 indien het paar van taken $r$ aan dezelfde persoon $j$ toegewezen worden.
 
 
 
@@ -133,13 +163,16 @@ De doelfunctie minimaliseert de som van de rankings van de toegewezen taken en $
 #https://www.r-orms.org/mixed-integer-linear-programming/packages/modelling-milp/
 model <- MIPModel() %>% 
   add_variable(x[i, j], i = 1:nb_tasks, j = 1:nb_team, type = "binary") %>% 
+  add_variable(y[r, j], r = 1:nb_interactie, j = 1:nb_team, type = "binary") %>% 
   add_variable(s_min[j], j = 1:nb_team, type = "continuous", lb = 0) %>% 
   add_variable(s_plus[j], j = 1:nb_team, type = "continuous", lb = 0) %>% 
   set_objective(sum_expr(w[i, j] * x[i, j], i = 1:nb_tasks, j = 1:nb_team) +
                   gewicht_afwijking_tijdsinvestering * sum_expr(s_min[j],
                          j = 1:nb_team) +
                   gewicht_afwijking_tijdsinvestering * sum_expr(s_plus[j],
-                           j = 1:nb_team),
+                           j = 1:nb_team) +
+                  sum_expr(p_r[r] * sum_expr(y[r, j], j = 1:nb_team),
+                           r = 1:nb_interactie),
                 sense = "min") %>% 
   add_constraint(sum_expr(x[i, j], j = 1:nb_team) >= n[i], i = 1:nb_tasks) %>% 
   add_constraint(t_accent[j] - sum_expr(t[i] * x[i, j], i = 1:nb_tasks)
@@ -167,6 +200,26 @@ if (sum(!is.na(data_taken$taak_houden)) > 0) {
       add_constraint(x[i, j] == 1, j = teamlid[z], i = taak[z])
   }
 }
+#beperking voor taken die niet door dezelfde persoon mogen uitgevoerd worden
+for (z in seq_len(nrow(data_mag_niet))) {
+  l <- as.numeric(unlist(data_mag_niet[z, "taak_1_nr"]))
+  k <- as.numeric(unlist(data_mag_niet[z, "taak_2_nr"]))
+  model <- model %>%
+  add_constraint(x[l, j] <= 1 - x[k, j], j = 1:nb_team)
+}
+
+#beperking voor taken die best wel door dezelfde persoon uitgevoerd worden
+for (z in seq_len(nrow(data_interactie))) {
+  l <- as.numeric(unlist(data_interactie[z, "taak_1_nr"]))
+  k <- as.numeric(unlist(data_interactie[z, "taak_2_nr"]))
+  model <- model %>%
+  add_constraint(y[z, j] >= -1 + x[l, j] + x[k, j], j = 1:nb_team) %>%
+  add_constraint(y[z, j] <= x[l, j], j = 1:nb_team) %>%
+  add_constraint(y[z, j] <= x[k, j], j = 1:nb_team)
+}
+
+
+
 library(ROI)
 library(ROI.plugin.glpk)
 library(ompr.roi)

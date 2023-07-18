@@ -45,7 +45,7 @@ p1 + p2
 
 ### Tijdsbesteding per persoon 
 
-Voor de optimalisatie berekenden we de parameter $t'_{j}$; de tijd die ieder teamlid zou moeten spenderen aan teamtaken voor een eerlijke verdeling. We weten dat, in totaal, $\sum_i t_i*n_i$ dagen aan teamtaken moeten gespendeerd worden in het team. Per persoon komt dat neer op $t'_j = f_j * \frac{\sum_i(t_i*n_i)}{\sum_j f_j}$ dagen waarbij er gecorrigeerd wordt voor teamleden die niet fulltime werken door de parameter $f_j$ (gelijk aan 1 indien teamlid $j$ fulltime werkt. Figuur \@ref(fig:{{id}}-tijdsbesteding) toont, voor ieder van de teamleden aan welke taken zij hun tijd zullen spenderen en hoe ver zij van hun "eerlijke" tijd verwijderd zitten.
+Voor de optimalisatie berekenden we de parameter $t'_{j}$; de tijd die ieder teamlid zou moeten spenderen aan teamtaken voor een eerlijke verdeling. We weten dat, in totaal, $\sum_i t_i*n_i$ dagen aan teamtaken moeten gespendeerd worden in het team. Per persoon komt dat neer op $t'_j = f_j * \frac{\sum_i(t_i*n_i)}{\sum_j f_j}$ dagen waarbij er gecorrigeerd wordt voor teamleden die niet fulltime werken door de parameter $f_j$ (gelijk aan 1 indien teamlid $j$ fulltime werkt en anders $<1$). Figuur \@ref(fig:{{id}}-tijdsbesteding) toont, voor ieder van de teamleden aan welke taken zij hun tijd zullen spenderen en hoe ver zij van hun "eerlijke" tijd verwijderd zitten.
 
 
 ```{r {{id}}-tijdsbesteding, include = TRUE, eval = TRUE, echo = FALSE, message = FALSE, warning = FALSE, fig.cap = "Tijdsbesteding van ieder teamlid aan teamtaken. Het sterretje toont een eerlijke tijdsinvestering voor het teamlid"}
@@ -62,16 +62,18 @@ toewijzing %>%
   theme_bw()
 ```
 
-Tabel \@ref(tab:{{id}}-slack) toont de waarde van de slack variabelen. Zoals reeds eerder beschreven, $s^-_j >0$ indien teamlid $j$ meer tijd spendeert aan teamtaken dan hij eigenlijk zou moeten. $s^+_j >0$ indien team $j$ minder tijd spendeert aan teamtaken dan hij eigenlijk zou moeten. 
-
 ```{r {{id}}-slack, include = TRUE, eval = TRUE, echo = FALSE, message = FALSE, warning = FALSE}
-get_solution(result, s_min[j]) %>%
+slacktabel <- get_solution(result, s_min[j]) %>%
   dplyr::select(-variable) %>%
   rename(s_min = value) %>%
   left_join(get_solution(result, s_plus[j]) %>%
               dplyr::select(-variable) %>%
               rename(s_plus = value)
-            ) %>%
+            )
+smin <- sum(slacktabel$s_min)
+splus <- sum(slacktabel$s_plus)
+
+slacktabel %>%
   kable("latex",
         booktabs = TRUE,
         caption = "waarde van de slack variabelen",
@@ -79,3 +81,5 @@ get_solution(result, s_min[j]) %>%
         escape = FALSE) %>%
   kableExtra::kable_styling()
 ```
+
+Tabel \@ref(tab:{{id}}-slack) toont de waarde van de slack variabelen. Zoals reeds eerder beschreven, $s^-_j >0$ indien teamlid $j$ meer tijd spendeert aan teamtaken dan hij eigenlijk zou moeten. $s^+_j >0$ indien team $j$ minder tijd spendeert aan teamtaken dan hij eigenlijk zou moeten. `r ifelse(round(smin, 5) == round(splus, 5), "De som over alle $s^+_j >0$ is gelijk aan de som over alle $s^-_j >0$. Dit betekent dat er juist even veel teamleden zijn toegewezen aan iedere taak als nodig is (de eerste constraint in formulering \\ref{eq:ip-formulering} is *tight*).", "De som over alle rijen van de tweede kolom is niet gelijk aan de som over alle rijen van de eerste kolom. Dit wil zeggen dat er meer teamleden zijn toegewezen aan sommige taken dan strikt noodzakelijk. Dit fenomeen is mogelijk indien $p_t$ hoog gekozen wordt.")`

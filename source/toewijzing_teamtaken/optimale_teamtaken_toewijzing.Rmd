@@ -116,7 +116,7 @@ data_voorkeur %>%
     "latex",
     booktabs = T,
     caption = "Overzicht van de voorkeuren en tijdsinvestering per persoon",
-    col.names = c("$w_{ij}$", data_tijd$teamlid),
+    col.names = c("$w_{ij}$", data_tijd$naam),
     escape = FALSE) %>%
   kableExtra::kable_styling() %>%
   row_spec(nrow(data_voorkeur), hline_after = TRUE) %>%

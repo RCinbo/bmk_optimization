@@ -5,6 +5,8 @@ date: "`r Sys.Date()`"
 output: 
   bookdown::pdf_book:
     toc: false
+params: 
+  anoniem: FALSE
 ---
 
 ```{r setup, include=FALSE}
@@ -16,25 +18,28 @@ library(patchwork)
 library(kableExtra)
 library(ompr)
 library(latex2exp)
-
+library(RColorBrewer)
 knitr::opts_chunk$set(echo = TRUE)
 gewicht_geen_top <- 100
-gewicht_afwijking_tijdsinvestering <- 0.5
+gebruikte_top <- 15
+gewicht_afwijking_tijdsinvestering <- 5
 gewicht_interactie <- data.frame(relatie = c(1, 2, 3),
                                  kost = c(-0.5, -2, -5)) #moet negatief zijn; indien een persoon twee taken die bij elkaar passen doet, krijg je deze 'korting'
 N <- 99999
-inbo_medewerker <- "teamcharter" # taak die door een inbo teamlid MOET 
+inbo_medewerker <- "EVINBO coördinatie" # taak die door een inbo teamlid MOET 
                   # uitgevoerd worden. NA indien er zo geen taak is
-evinbo_medewerker <- "EVINBO" # taak die door een EVinbo teamlid MOET 
+evinbo_medewerker <- "backup en administratie EVINBO" # taak die door een EVinbo teamlid MOET 
                   # uitgevoerd worden. NA indien er zo geen taak is
-bron <- find_root_file("data", "test.xlsx",
+bron <- find_root_file("data", "Data_teamtaken.xlsx",
                        criterion = has_file("BMK_optimization.Rproj"))
 data_taken <- readxl::read_excel(path = bron,
                                  sheet = "taken")
 data_tijd <- readxl::read_excel(path = bron,
                                  sheet = "tijdsinvesteringen")
 data_voorkeur <- readxl::read_excel(path = bron,
-                                 sheet = "voorkeuren")
+                                 sheet = "voorkeuren",
+                                 skip = 1)
+
 data_interactie <- readxl::read_excel(path = bron,
                                  sheet = "interactie_taken") %>%
   dplyr::select(1:3) %>%
@@ -54,6 +59,16 @@ nb_interactie <- nrow(data_interactie)
 nb_tasks <- nrow(data_taken)
 nb_team <- nrow(data_tijd)
 evinbo <-  as.numeric(unlist(data_tijd$EVINBO))
+#beperk de top die gebruikt wordt
+intop <- function(x) {
+  test <- x > gebruikte_top
+  return(ifelse(test, NA, x))
+}
+data_voorkeur2 <- data_voorkeur %>%
+  mutate(across(-taak, intop))
+#Deze taak moet door bijna iedereen gedaan worden. Als ze het niet in hun top 15 hebben staan, zet ik het op de 16de plaats.
+data_voorkeur2[16, which(is.na(data_voorkeur2[16, ]))] <- data_voorkeur[16, which(is.na(data_voorkeur2[16, ]))]
+data_voorkeur <- data_voorkeur2
 w <- as.matrix(data_voorkeur[, -1])
 w[is.na(w)] <- gewicht_geen_top
 t <- as.numeric(unlist(data_taken$tijdsinvestering))
@@ -61,6 +76,8 @@ n <- as.numeric(unlist(data_taken$personen))
 t_accent <- sum(t*n) / sum(data_tijd$tijdsinvestering) *
   as.numeric(unlist(data_tijd$tijdsinvestering))
 p_r <- as.numeric(unlist(data_interactie$kost))
+
+
 ```
 
 # Inleiding
@@ -71,37 +88,43 @@ De scripts voor data verwerking kunnen in *[deze Git repository](https://github.
 
 # Data overzicht
 
-Allereerst wordt er een lijst gemaakt van alle taken die momenteel door teamleden opgenomen worden. Voor iedere taak wordt ook een inschatting gemaakt van de gemiddelde tijdsinvestering (in dagen per jaar) en het aantal medewerkers die deze taak kunnen (moeten) opnemen. Bij dit aantal personen worden geen backups meegerekend. Tabel \@ref(tab:taken) toont een overzicht van alle taken die door de teamleden moeten opgenomen worden.
+Allereerst wordt er een lijst gemaakt van alle taken die momenteel door teamleden opgenomen worden. Voor iedere taak wordt ook een inschatting gemaakt van de gemiddelde tijdsinvestering (in dagen per jaar) en het aantal medewerkers die deze taak kunnen (moeten) opnemen. Bij dit aantal personen worden geen backups meegerekend. Tabel \@ref(tab:taken) toont een overzicht van alle taken die door de teamleden moeten opgenomen worden. De taak "`r inbo_medewerker`" moet door een INBO medewerker uitgevoerd worden. De taak "`r evinbo_medewerker`" moet door een EV-INBO medewerker uitgevoerd worden.
 
 ```{r taken, echo=FALSE}
 data_taken %>%
-  dplyr::select(-`uitgebreidde taakbeschrijving`) %>%
+  dplyr::select(-`uitgebreide_taakbeschrijving`, -taak_houden) %>%
   kable("latex",
         booktabs = T,
         caption = "Overzicht van de taken",
         col.names = c("taak $i$", "beschrijving", "tijdsinvestering $t_i$",
-                      "personen $n_i$", "taak houden"),
+                      "personen $n_i$"),
         escape = FALSE) %>%
-  kableExtra::kable_styling()
+  kableExtra::kable_styling() %>%
+  kableExtra::column_spec(2, width = "7cm")
 ```
 
-Ieder van de medewerkers geeft ook een top `r max(data_voorkeur[, -1], na.rm=TRUE)` door van zijn favoriete taken. Tabel \@ref(tab:voorkeur) toont de voorkeuren voor ieder van de taken. Ten slot laat het model toe dat sommige mensen minder tijd investeren in teamtaken dan anderen (bijvoorbeeld indien zij niet voltijds werken; zie laatste rij van Tabel \@ref(tab:voorkeur)).
+Ieder van de medewerkers geeft ook een ranking door van zijn meest tot minst favoriete taak. In deze analyse gebruiken we enkel de top `r gebruikte_top` van ieder van de medewerkers.
+Er is één uitzondering: de taak "`r unname(unlist(data_taken[16, "beschrijving"]))`" moet door bijna iedereen gedaan worden en voor deze taak behouden we dan ook de ranking, zelfs als die buiten de top `r gebruikte_top` valt.  `r ifelse(params$anoniem, "Deze voorkeuren worden niet weergegeven in de anonieme analyse", "Onderstaande tabel toont de voorkeuren voor ieder van de taken.")`.
 
-```{r voorkeur, echo=FALSE}
+Ten slot laat het model toe dat sommige mensen minder tijd investeren in teamtaken dan anderen (bijvoorbeeld indien zij niet voltijds werken`r ifelse(params$anoniem, "", "; zie laatste rij van onderstaande tabel")`).
+
+```{r voorkeur, echo=FALSE, eval = !params$anoniem}
 data_voorkeur %>% 
-  rbind(c("$f_j$", data_tijd$tijdsinvestering)) %>%
+  rbind(c("$f_j$", round(data_tijd$tijdsinvestering,2))) %>%
   replace(is.na(.), "") %>%
   kable(
     "latex",
     booktabs = T,
-    caption = "Overzicht van de voorkeuren  en tijdsinvestering per persoon",
-    col.names = c("$w_{ij}$", colnames(data_voorkeur)[-1]),
+    caption = "Overzicht van de voorkeuren en tijdsinvestering per persoon",
+    col.names = c("$w_{ij}$", data_tijd$teamlid),
     escape = FALSE) %>%
   kableExtra::kable_styling() %>%
   row_spec(nrow(data_voorkeur), hline_after = TRUE) %>%
   add_header_above(header = c("" , "Teamlid" = ncol(data_voorkeur) - 1))
 ```
+
 \clearpage
+
 # Methodologie
 
 Voor de optimalisatie wordt een mixed integer program (MIP) opgesteld (zie formulering \@ref(eq:ip-formulering)) en geoptimaliseerd met behulp van het *ompr* package.
@@ -110,14 +133,14 @@ De formulering van het MIP is als volgt:
 
 \begin{equation} 
 \begin{aligned}
-min & \sum_{i, j}(w_{ij} * x_{ij}) + p_t * \sum_{j}(s^{-}_{j} +  s^{+}_{j}) + \sum_{r}(p_r * y_r)\\
+min & \sum_{i, j}(w_{ij} * x_{ij}) + p_t * \sum_{j}(s^{-}_{j} +  s^{+}_{j}) + \sum_{r}(p_r * \sum_{j}(y_{rj}))\\
 s.t. & \\
- & \sum_j x_{ij} >= n_i &\forall i\\
+ & \sum_j x_{ij} = n_i &\forall i\\
  & t^{'}_{j} - \sum_i(t_i * x_{ij})  \leq s^{+}_{j} & \forall j\\
  & \sum_i(t_i * x_{ij}) - t^{'}_{j} \leq  s^{-}_{j} & \forall j\\
  & \sum_{j \in \Lambda_I} x_{ij} \geq n_i &\forall i \in \Theta_I\\
  & \sum_{j \in \Lambda_E} x_{ij} \geq n_i &\forall i \in \Theta_E\\
- & x_{i\in f(j), j} = 1 &\forall j\\
+ & x_{i\in fav(j), j} = 1 &\forall j\\
  & x_{i_1, j} \leq 1 -  x_{i_1, j} &\forall j, \forall i_1, i_2 \in \Phi_{-1}\\
  & y_r \geq - 1 + x_{i_1, j} + x_{i_2, j} &\forall j, \forall r, i_1, i_2 \in \Phi_{+}\\
  & y_r \leq x_{i_1, j} &\forall j, \forall r, i_1 \in \Phi_{+}\\
@@ -130,15 +153,12 @@ s.t. & \\
 
 Het MIP gebruikt de volgende parameters:
 
-- De gewichten $w_{ij}$ weerspiegelen de voorkeuren van de teamleden. Indien taak $i$ de favoriete taak is van teamlid $j$, dan is $w_{ij} = 1$. De `r max(data_voorkeur[, -1], na.rm=TRUE)`de favoriete taak van teamlid $j$ krijgt gewicht $w_{ij}=$ `r max(data_voorkeur[, -1], na.rm=TRUE)`. Alle taken die niet in de top `r max(data_voorkeur[, -1], na.rm=TRUE)` staan, krijgen gewicht `r gewicht_geen_top`. 
+- De gewichten $w_{ij}$ weerspiegelen de voorkeuren van de teamleden. Indien taak $i$ de favoriete taak is van teamlid $j$, dan is $w_{ij} = 1$. De `r gebruikte_top`de favoriete taak van teamlid $j$ krijgt gewicht $w_{ij}=$ `r gebruikte_top`. Alle taken die niet in de top staan, krijgen gewicht `r gewicht_geen_top`. 
 - $t_i$ is het geschatte aantal dagen die per jaar nodig zijn om taak $i$ uit te voeren.
 - $n_i$ is het aantal personen dat ingezet moet worden voor taak $i$. We gaan er van uit dat ieder van deze personen even veel tijd moeten spenderen aan de taak ($t_i$)
-- $t^{'}_{j}$ is het aantal dagen dat teamlid $j$ aan teamtaken zou moeten spenderen per jaar. Dit wordt berekent met de formule $t'_j = f_j * \frac{\sum_i(t_i*n_i)}{\sum_j f_j}$.
+- $t^{'}_{j}$ is het aantal dagen dat teamlid $j$ in totaal aan teamtaken zou moeten spenderen per jaar. Dit wordt berekent met de formule $t'_j = f_j * \frac{\sum_i(t_i*n_i)}{\sum_j f_j}$.
 - $p_t$ is de kost die verbonden is aan iedere dag per jaar dat een teamlid meer of minder moet spenderen aan teamtaken dan hij in principe zou moeten spenderen ($t^{'}_{j}$). Deze parameter kan vrij gekozen worden om de afweging die gemaakt wordt tussen voorkeuren en afwijkingen in de totale tijdsbesteding van een teamlid bij te stellen. Momenteel is deze parameter gelijk aan `r gewicht_afwijking_tijdsinvestering`. Een toewijzing van een taak die 2de gerangschikt staat in plaats van 1ste weegt dus even zwaar door in de doelfunctie als `r 1/gewicht_afwijking_tijdsinvestering` `r ifelse(1/gewicht_afwijking_tijdsinvestering>1, "dagen", "dag")` meer of minder werk dan gepland voor een teamlid.
-<!-- - $r_p$ is de waarde van de relatie tussen twee taken $i_1$ en $i_2$. Mogelijke waardes zijn 1, 2, of 3. -->
 - $p_{r}$ is een negatieve kost; het is de bonus die verbonden is aan het toewijzen van taak $i_1$ en $i_2$ aan dezelfde persoon $j$ indien de waarde van de relatie tussen de taken groter dan 0 is.
-<!-- - $p_{r2}$ is een negatieve kost; het is de bonus die verbonden is aan het toewijzen van taak $i_1$ en $i_2$ aan dezelfde persoon $j$ indien de waarde van de relatie tussen de taken 2 is.  -->
-<!-- - $p_{r3}$ is een negatieve kost; het is de bonus die verbonden is aan het toewijzen van taak $i_1$ en $i_2$ aan dezelfde persoon $j$ indien de waarde van de relatie tussen de taken 3 is.  -->
 - $\Theta_{I}$ en $\Theta_E$ zijn de verzameling van taken die respectievelijk door een INBO of EVINBO teamlid moeten uitgevoerd worden. $\Lambda_I$ en $\Lambda_E$ zijn de teamleden die respectievelijk INBO en EVINBO werknemers zijn. 
 - $\Phi_{-1}$ is de verzameling van paren van taken die niet aan dezelfde persoon mogen toegewezen worden.
 - $\Phi_{+}$ is de verzameling van paren van taken die bij voorkeur aan dezelfde persoon toegewezen worden (ze hebben een positieve relatie).
@@ -152,7 +172,7 @@ In het MIP zijn $x_{ij}$, $s^{-}_{j}$, $s^{+}_{j}$, en $y_{rj}$ de beslissingsva
 
 De doelfunctie minimaliseert de som van de rankings van de toegewezen taken en $p_t$ keer de som over alle teamleden van de absolute waarde van het verschil tussen de geplande tijd voor teamtaken ($\sum_i(t_i * x_{ij})$) en $t^{'}_{j}$.
 De vierde en vijfde beperking zorgen er voor dat de taken die door een (EV)INBO werknemer moeten uitgevoerd worden ook aan een  (EV)INBO werknemer worden toegewezen. 
-De zesde beperking zorgt er voor dat teamleden hun favoriete taak kunnen houden. (met $f(j)$ de favoriete ta(a)k(en) van teamlid $j$).
+De zesde beperking zorgt er voor dat teamleden hun favoriete taak kunnen houden. (met $fav(j)$ de favoriete ta(a)k(en) van teamlid $j$).
 De zevende beperking zorgt er voor dat taken die niet door dezelfde persoon mogen uitgevoerd worden niet aan dezelfde persoon worden toegewezen. 
 De achtste, negende en tiende beperking zorgen er voor dat $y_{rj}$ gelijk is aan 1 indien het paar van taken $r$ aan dezelfde persoon $j$ toegewezen worden.
 
@@ -163,32 +183,35 @@ De achtste, negende en tiende beperking zorgen er voor dat $y_{rj}$ gelijk is aa
 #https://www.r-orms.org/mixed-integer-linear-programming/packages/modelling-milp/
 model <- MIPModel() %>% 
   add_variable(x[i, j], i = 1:nb_tasks, j = 1:nb_team, type = "binary") %>% 
-  add_variable(y[r, j], r = 1:nb_interactie, j = 1:nb_team, type = "binary") %>% 
+  add_variable(y[r, j], r = 1:nb_interactie, j = 1:nb_team, type = "binary") %>%
   add_variable(s_min[j], j = 1:nb_team, type = "continuous", lb = 0) %>% 
   add_variable(s_plus[j], j = 1:nb_team, type = "continuous", lb = 0) %>% 
   set_objective(sum_expr(w[i, j] * x[i, j], i = 1:nb_tasks, j = 1:nb_team) +
-                  gewicht_afwijking_tijdsinvestering * sum_expr(s_min[j],
-                         j = 1:nb_team) +
-                  gewicht_afwijking_tijdsinvestering * sum_expr(s_plus[j],
-                           j = 1:nb_team) +
+                  gewicht_afwijking_tijdsinvestering *
+                  sum_expr(s_min[j], j = 1:nb_team) +
+                  gewicht_afwijking_tijdsinvestering *
+                  sum_expr(s_plus[j], j = 1:nb_team) +
                   sum_expr(p_r[r] * sum_expr(y[r, j], j = 1:nb_team),
                            r = 1:nb_interactie),
                 sense = "min") %>% 
   add_constraint(sum_expr(x[i, j], j = 1:nb_team) >= n[i], i = 1:nb_tasks) %>% 
+  add_constraint(sum_expr(x[i, j], j = 1:nb_team) <= n[i], i = 1:nb_tasks) %>% 
   add_constraint(t_accent[j] - sum_expr(t[i] * x[i, j], i = 1:nb_tasks)
                  <= s_plus[j], j = 1:nb_team) %>% 
   add_constraint(sum_expr(t[i] * x[i, j], i = 1:nb_tasks) - t_accent[j]
                  <= s_min[j], j = 1:nb_team)
 if (!is.na(evinbo_medewerker)) {
   evinbo_taken <- which(data_taken$beschrijving %in% evinbo_medewerker)
+  evinbo_medewerkers <- which(data_tijd$EVINBO == 1)
   model <- model %>%
-    add_constraint(sum_expr(x[i, j], j = which(data_tijd$EVINBO == 1)) >= n[i],
+    add_constraint(sum_expr(x[i, j], j = evinbo_medewerkers) >= n[i],
                    i = evinbo_taken) 
 }
 if (!is.na(inbo_medewerker)) {
   inbo_taken <- which(data_taken$beschrijving %in% inbo_medewerker)
+  inbo_medewerkers <- which(data_tijd$EVINBO == 0)
   model <- model %>%
-    add_constraint(sum_expr(x[i, j], j = which(data_tijd$EVINBO == 0)) >= n[i],
+    add_constraint(sum_expr(x[i, j], j = inbo_medewerkers) >= n[i],
                    i = inbo_taken) 
 }
 if (sum(!is.na(data_taken$taak_houden)) > 0) {
@@ -218,8 +241,6 @@ for (z in seq_len(nrow(data_interactie))) {
   add_constraint(y[z, j] <= x[k, j], j = 1:nb_team)
 }
 
-
-
 library(ROI)
 library(ROI.plugin.glpk)
 library(ompr.roi)
@@ -242,7 +263,15 @@ library(ompr.roi)
 
 ## Een startoplossing
 
-In deze sectie beschrijven we de startoplossing. Deze oplossing is optimaal in het MIP model (formulering \@ref(eq:ip-formulering)). Hoewel de oplossing optimaal is, is het mogelijk dat er toch een onevenwicht is dat bijgesteld moet worden. Een voorbeeld is dat bijna iedereen zijn 1ste en 2de keuze heeft, behalve één teamlid dat enkel taken toegewezen kreeg die niet in zijn top `r max(data_voorkeur[, -1], na.rm=TRUE)` stonden. Een gebalanceerdere oplossing kan dan eventueel gezocht worden door extra beperkingen toe te voegen.
+In deze sectie beschrijven we de startoplossing. Deze oplossing is optimaal in het MIP model (formulering \@ref(eq:ip-formulering)). Hoewel de oplossing optimaal is, is het mogelijk dat er toch een onevenwicht is dat bijgesteld moet worden. De waardes van de verschillende kostenparameters zijn:
+
+- Kost voor een toewijzing buiten de top: `r gewicht_geen_top`
+- Grootte van de gebruikte top: `r gebruikte_top`
+- Kost voor een dag afwijking (positief of negatief) van een eerlijke tijdsinvestering: `r gewicht_afwijking_tijdsinvestering`
+- Beloning om taken met een interactie van respectievelijk typetoe te wijzen aan dezelfde persoon: `r str_c(-1*(gewicht_interactie$kost), collapse = ", ")`
+
+
+`r ifelse(params$anoniem, "Aangezien we hier naar de geanonimiseerde data kijken, tonen we de toewijzing van taken aan personen niet. We bekijken wel de ranking van de taken die toegewezen werden en hoe eerlijk de tijdsbesteding is.", "")`
 
 ```{r echo=FALSE, warning = FALSE, include = FALSE}
 result <- model %>% 
@@ -250,43 +279,173 @@ result <- model %>%
 id <- "begin"
 ```
 
-```{r echo=FALSE, results='asis'}
+```{r echo=FALSE, results='asis', eval = !params$anoniem}
 cat(
   knitr::knit(text = knitr::knit_expand('_MIP_resultaat.Rmd', envir = environment(), quiet = TRUE), quiet = TRUE
+  ))
+```
+
+```{r echo=FALSE, results='asis', eval = params$anoniem}
+cat(
+  knitr::knit(text = knitr::knit_expand('_MIP_resultaat_anoniem.Rmd', envir = environment(), quiet = TRUE), quiet = TRUE
+  ))
+```
+
+Aangezien er een grote afwijking is van een eerlijke tijdsverdeling, maken we de kost voor deze afwijking $p_t$ hoger. We hopen dat er niet te veel taken met lagere voorkeur worden toegewezen en we toch een gebalanceerder resultaat krijgen qua tijdsbesteding.
+
+\clearpage
+
+## Een eerste alternatief met een hogere kost voor afwijkingen in tijdsbestedingen
+De eerste oplossing toont dat er slechts 4 taken worden toegewezen aan teamleden die deze taak niet in hun top `r gebruikte_top` hadden staat. Het betreft een taak die door 9/10 teamleden MOET uitgevoerd worden. Dit is dus niet zo verwonderlijk. 
+
+In de resultaten hieronder kiezen we $p_t = 10$ in plaats van $p_t = 5$. Hierdoor verwachten we dat de verdeling in tijdsbestedingen eerlijker is maar misschien verliezen we daardoor wel wat op vlak van voorkeuren.
+
+
+```{r echo=FALSE, warning = FALSE, include = FALSE}
+gewicht_afwijking_tijdsinvestering <- 10
+model <- MIPModel() %>% 
+  add_variable(x[i, j], i = 1:nb_tasks, j = 1:nb_team, type = "binary") %>% 
+  add_variable(y[r, j], r = 1:nb_interactie, j = 1:nb_team, type = "binary") %>%
+  add_variable(s_min[j], j = 1:nb_team, type = "continuous", lb = 0) %>% 
+  add_variable(s_plus[j], j = 1:nb_team, type = "continuous", lb = 0) %>% 
+  set_objective(sum_expr(w[i, j] * x[i, j], i = 1:nb_tasks, j = 1:nb_team) +
+                  gewicht_afwijking_tijdsinvestering *
+                  sum_expr(s_min[j], j = 1:nb_team) +
+                  gewicht_afwijking_tijdsinvestering *
+                  sum_expr(s_plus[j], j = 1:nb_team) +
+                  sum_expr(p_r[r] * sum_expr(y[r, j], j = 1:nb_team),
+                           r = 1:nb_interactie),
+                sense = "min") %>% 
+  add_constraint(sum_expr(x[i, j], j = 1:nb_team) >= n[i], i = 1:nb_tasks) %>% 
+  add_constraint(sum_expr(x[i, j], j = 1:nb_team) <= n[i], i = 1:nb_tasks) %>% 
+  add_constraint(t_accent[j] - sum_expr(t[i] * x[i, j], i = 1:nb_tasks)
+                 <= s_plus[j], j = 1:nb_team) %>% 
+  add_constraint(sum_expr(t[i] * x[i, j], i = 1:nb_tasks) - t_accent[j]
+                 <= s_min[j], j = 1:nb_team)
+if (!is.na(evinbo_medewerker)) {
+  evinbo_taken <- which(data_taken$beschrijving %in% evinbo_medewerker)
+  evinbo_medewerkers <- which(data_tijd$EVINBO == 1)
+  model <- model %>%
+    add_constraint(sum_expr(x[i, j], j = evinbo_medewerkers) >= n[i],
+                   i = evinbo_taken) 
+}
+if (!is.na(inbo_medewerker)) {
+  inbo_taken <- which(data_taken$beschrijving %in% inbo_medewerker)
+  inbo_medewerkers <- which(data_tijd$EVINBO == 0)
+  model <- model %>%
+    add_constraint(sum_expr(x[i, j], j = inbo_medewerkers) >= n[i],
+                   i = inbo_taken) 
+}
+if (sum(!is.na(data_taken$taak_houden)) > 0) {
+  taak <- which(!is.na(data_taken$taak_houden))
+  teamlid <- sapply(X = unlist(unname(data_taken[taak, "taak_houden"])),
+                    FUN = function(x) which(data_tijd$teamlid == x))
+  for (z in seq_len(length(taak))) {
+    model <- model %>%
+      add_constraint(x[i, j] == 1, j = teamlid[z], i = taak[z])
+  }
+}
+#beperking voor taken die niet door dezelfde persoon mogen uitgevoerd worden
+for (z in seq_len(nrow(data_mag_niet))) {
+  l <- as.numeric(unlist(data_mag_niet[z, "taak_1_nr"]))
+  k <- as.numeric(unlist(data_mag_niet[z, "taak_2_nr"]))
+  model <- model %>%
+  add_constraint(x[l, j] <= 1 - x[k, j], j = 1:nb_team)
+}
+
+#beperking voor taken die best wel door dezelfde persoon uitgevoerd worden
+for (z in seq_len(nrow(data_interactie))) {
+  l <- as.numeric(unlist(data_interactie[z, "taak_1_nr"]))
+  k <- as.numeric(unlist(data_interactie[z, "taak_2_nr"]))
+  model <- model %>%
+  add_constraint(y[z, j] >= -1 + x[l, j] + x[k, j], j = 1:nb_team) %>%
+  add_constraint(y[z, j] <= x[l, j], j = 1:nb_team) %>%
+  add_constraint(y[z, j] <= x[k, j], j = 1:nb_team)
+}
+result <- model %>% 
+  solve_model(with_ROI("glpk", verbose = TRUE))
+id <- "alternatief"
+```
+
+```{r echo=FALSE, results='asis', eval = !params$anoniem}
+cat(
+  knitr::knit(text = knitr::knit_expand('_MIP_resultaat.Rmd',
+                                        envir = environment(), quiet = TRUE),
+              quiet = TRUE
+  ))
+```
+
+```{r echo=FALSE, results='asis', eval = params$anoniem}
+cat(
+  knitr::knit(text = knitr::knit_expand('_MIP_resultaat_anoniem.Rmd',
+                                        envir = environment(), quiet = TRUE),
+              quiet = TRUE
+  ))
+```
+
+Dit resultaat ziet er al iets beter uit. We lijken niet al te veel te verliezen op vlak van voorkeuren en de tijdsbesteding is gebalanceerder. We gaan na of we dit eventueel nog kunnen verbeteren.
+
+\clearpage
+
+## Een tweede alternatief met een extra beperking
+We zien dat teamlid 6 wat minder moet presteren en een teamlid 4 meer dan een eerlijke toewijzing zou voorschrijven. 
+
+De resultaten hieronder beschrijven de resultaten waarbij $s^-_4<1.5$ toegevoegd wordt aan het model om er voor te zorgen dat dit teamlid minder tijd moet besteden aan teamtaken dan in de vorige oplossing. 
+
+```{r echo=FALSE, warning = FALSE, include = FALSE}
+result <- model %>% 
+  add_constraint(s_min[j] <= 1.5, j = 4) %>%
+  solve_model(with_ROI("glpk", verbose = TRUE))
+id <- "alternatiefa"
+```
+
+```{r echo=FALSE, results='asis', eval = !params$anoniem}
+cat(
+  knitr::knit(text = knitr::knit_expand('_MIP_resultaat.Rmd',
+                                        envir = environment(), quiet = TRUE),
+              quiet = TRUE
+  ))
+```
+
+```{r echo=FALSE, results='asis', eval = params$anoniem}
+cat(
+  knitr::knit(text = knitr::knit_expand('_MIP_resultaat_anoniem.Rmd',
+                                        envir = environment(), quiet = TRUE),
+              quiet = TRUE
   ))
 ```
 
 \clearpage
 
-## Een betere oplossing?
+## Een derde alternatief
 
-De huidige oplossing, hoewel optimaal op team-niveau, is nadelig voor teamlid 6. Hij is om te beginnen de enige is die een taak zal moeten uitvoeren die niet in zijn top `r max(data_voorkeur[, -1], na.rm=TRUE)` staat. Daarenboven is hij de enige die net iets meer tijd zal spenderen aan teamtaken dan een eerlijke verdeling zou voorschrijven.
-We kunnen nu enkele extra beperkingen op maat toevoegen die de startoplossing uitsluiten. Op die manier, verplichten we het MIP naar een alternatieve oplossing te zoeken. Er zijn verschillende mogelijkheden:
-
-- We kunnen de beperking $s^-_6<0.46$ toevoegen om op te leggen dat teamlid 6 minder tijd spendeert aan teamtaken.
-- We kunnen een nieuwe kost parameter introduceren, $p_{t2}$,  die er voor zorgt dat een afwijking van een eerlijk tijdsspendering groter dan $x$ (bijvoorbeeld 0.3) aan teamtaken extra duur wordt.
-- We kunnen de beperking $x_{56} = 0$ toevoegen om op te leggen dat teamlid 6 taak 5 niet mag uitvoeren.
-
-De resultaten hieronder beschrijven de resultaten waarbij $s^-_6<0.46$ toegevoegd wordt aan het model.
+De resultaten hieronder beschrijven de resultaten waarbij $s^-_4<1.5$ en $s^-_1<1.5$ toegevoegd wordt aan het model. Hoewel de tijdsbesteding nu behoorlijk gebalanceerd is, zien we dat er iemand een heel grote taak krijgt toegewezen die niet meer in zijn/haar top 15 staat. Dit lijkt op deze manier een straatje zonder einde. 
 
 ```{r echo=FALSE, warning = FALSE, include = FALSE}
 result <- model %>% 
-  add_constraint(s_min[j] <= 0.46, j = 6) %>%
-  #add_constraint(x[i, j] == 0, i = 5, j = 6) %>%
+  add_constraint(s_min[j] <= 1.5, j = 4) %>%
+  add_constraint(s_min[j] <= 1.5, j = 1) %>%
   solve_model(with_ROI("glpk", verbose = TRUE))
-id <- "alternatief"
+id <- "alternatiefb"
 ```
 
-```{r echo=FALSE, results='asis'}
+
+```{r echo=FALSE, results='asis', eval = !params$anoniem}
 cat(
-  knitr::knit(text = knitr::knit_expand('_MIP_resultaat.Rmd', envir = environment(), quiet = TRUE), quiet = TRUE
+  knitr::knit(text = knitr::knit_expand('_MIP_resultaat.Rmd',
+                                        envir = environment(), quiet = TRUE),
+              quiet = TRUE
   ))
 ```
 
-### Bespreking
-
-We zien dat teamlid 1 nu de pineut is: hij moet taak 5 opnemen (die slechts 1 persoon in zijn top had staan) en moet ook nog eens meer tijd investeren in teamtaken dan een eerlijke verdeling zou voorschrijven. Bovendien zien we nu grotere afwijkingen van een eerlijke tijdsinvestering in teamtaken dan in de startoplossing.
+```{r echo=FALSE, results='asis', eval = params$anoniem}
+cat(
+  knitr::knit(text = knitr::knit_expand('_MIP_resultaat_anoniem.Rmd',
+                                        envir = environment(), quiet = TRUE),
+              quiet = TRUE
+  ))
+```
 
 # Conclusie
 
-Een MIP kan aangewend worden om snel een goede oplossing aan te bieden die optimaal is op teamniveau. Er kan gesleuteld worden aan de oplossing door nieuwe beperkingen toe te voegen maar dat geeft nooit een garantie op een betere oplossing.
+Na nog enkele extra testen (kosten wijzigen, beperkingen toevoegen,...) is het duidelijke dat er een keuze gemaakt moet worden tussen een licht ongebalanceerde tijdsbesteding (beste lijkt eerste alternatief) of een grote taak aan iemand toewijzen die de taak niet in zijn/haar top 15 had gezet (Derde alternatief). Waar geven we de voorkeur aan? 

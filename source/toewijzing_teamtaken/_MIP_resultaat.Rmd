@@ -3,6 +3,8 @@
 
 Tabel \@ref(tab:{{id}}-teamleden-en-taken) toont voor iedere taak welke teamleden er aan toegewezen werden. Ter controle bevat de laatste kolom parameter $n$: het aantal teamleden die aan de taak hadden moeten toegewezen worden.
 
+Tabel \@ref(tab:{{id}}-teamleden-en-taken2) toont voor alle teamleden welke taken ze toegewezen kregen.
+
 ```{r {{id}}-teamleden-en-taken, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE, include=TRUE}
 get_solution(result, x[i, j]) %>% 
   dplyr::filter(value == 1) %>%
@@ -11,9 +13,11 @@ get_solution(result, x[i, j]) %>%
     data_voorkeur %>%
       pivot_longer(cols = -1, names_to = "j", values_to = "top") %>%
       mutate(j = as.numeric(j)),
-    by = c("i" = "taak", "j" = "j")) -> toewijzing
+    by = c("i" = "taak", "j" = "j")) %>%
+  left_join(data_tijd %>% dplyr::select(teamlid, naam),
+            by = join_by("j" == "teamlid")) -> toewijzing
 toewijzing %>%
-  mutate(j = sprintf("%i (%i)", j, top)) %>%
+  mutate(j = sprintf("%s (%i)", naam, top)) %>%
   group_by(i, beschrijving, tijdsinvestering, personen) %>%
   summarize(toewijzing = paste(j, collapse = " & ")) %>%
   ungroup() %>%
@@ -22,25 +26,53 @@ toewijzing %>%
   rename(taak = i) %>%
   kable(booktabs = TRUE,
         caption = "Toewijzing van teamleden aan taken (ranking tussen haakjes)") %>%
-  kableExtra::kable_styling()
+  kableExtra::kable_styling() %>%
+  kableExtra::column_spec(2, width = "6.5cm") %>%
+  kableExtra::column_spec(4, width = "4cm")
 ```
+
+```{r {{id}}-teamleden-en-taken2, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE, include=TRUE}
+toewijzing %>%
+  mutate(taaktop = sprintf("%s (ranking %i, %.2g %s)",
+                           beschrijving, top, tijdsinvestering,
+                           ifelse(tijdsinvestering > 1,
+                                  "dagen", "dag"))) %>%
+  group_by(naam) %>%
+  summarize(toewijzing = paste(taaktop, collapse = ", ")) %>%
+  ungroup() %>%
+  arrange(naam) %>%
+  dplyr::select(naam, toewijzing) %>%
+  kable(booktabs = TRUE,
+        caption = "Toegewezen taken per teamlid. Tussen haakjes wordt de ranking getoond die het teamlid aan de taak gaf en de benodigde tijdsinvestering.") %>%
+  kableExtra::kable_styling() %>%
+  kableExtra::column_spec(2, width = "11cm")
+```
+
 
 Figuur \@ref(fig:{{id}}-top-toewijzing) toont hoe vaak een keuze uit de top `r max(data_voorkeur[, -1], na.rm=TRUE)` werd toegewezen, aan welke teamleden en aan welke taak.
 
 ```{r {{id}}-top-toewijzing, include = TRUE, eval = TRUE, echo = FALSE, message = FALSE, warning = FALSE, fig.cap = "Ranking van de toegewezen taken bij de voorkeuren van de teamleden."}
 p1 <- toewijzing %>%
   ggplot() +
-  geom_bar(aes(x = as.factor(top), fill = as.factor(j))) +
-  scale_fill_brewer(name = "teamlid", palette = 1) +
+  geom_bar(aes(x = as.factor(top), fill = as.factor(naam))) +
+  scale_fill_brewer(name = "teamlid", palette = "Paired") +
   xlab("ranking van de taak die toegewezen werd") +
   theme_bw()
+# p2 <- toewijzing %>%
+#   ggplot() +
+#   geom_bar(aes(x = as.factor(top), fill = as.factor(i))) +
+#   scale_fill_brewer(name = "taak", palette = palette(gray(seq(0,.9,len = nb_tasks)))) +
+#   xlab("ranking van de taak die toegewezen werd") +
+#   theme_bw()
 p2 <- toewijzing %>%
   ggplot() +
-  geom_bar(aes(x = as.factor(top), fill = as.factor(i))) +
-  scale_fill_brewer(name = "taak", palette = "RdYlBu") +
+  geom_bar(aes(y = tijdsinvestering, x = as.factor(top), fill = as.factor(naam)),
+           stat = "identity") +
+  scale_fill_brewer(name = "teamlid", palette = "Paired") +
   xlab("ranking van de taak die toegewezen werd") +
   theme_bw()
-p1 + p2
+combined <- p1 + p2 & theme(legend.position = "bottom")
+combined + plot_layout(guides = "collect")
 ```
 
 ### Tijdsbesteding per persoon 
@@ -48,14 +80,21 @@ p1 + p2
 Voor de optimalisatie berekenden we de parameter $t'_{j}$; de tijd die ieder teamlid zou moeten spenderen aan teamtaken voor een eerlijke verdeling. We weten dat, in totaal, $\sum_i t_i*n_i$ dagen aan teamtaken moeten gespendeerd worden in het team. Per persoon komt dat neer op $t'_j = f_j * \frac{\sum_i(t_i*n_i)}{\sum_j f_j}$ dagen waarbij er gecorrigeerd wordt voor teamleden die niet fulltime werken door de parameter $f_j$ (gelijk aan 1 indien teamlid $j$ fulltime werkt en anders $<1$). Figuur \@ref(fig:{{id}}-tijdsbesteding) toont, voor ieder van de teamleden aan welke taken zij hun tijd zullen spenderen en hoe ver zij van hun "eerlijke" tijd verwijderd zitten.
 
 
-```{r {{id}}-tijdsbesteding, include = TRUE, eval = TRUE, echo = FALSE, message = FALSE, warning = FALSE, fig.cap = "Tijdsbesteding van ieder teamlid aan teamtaken. Het sterretje toont een eerlijke tijdsinvestering voor het teamlid"}
+```{r {{id}}-tijdsbesteding, include = TRUE, eval = TRUE, echo = FALSE, message = FALSE, warning = FALSE, fig.cap = "Tijdsbesteding van ieder teamlid aan teamtaken. Het sterretje toont een eerlijke tijdsinvestering voor het teamlid. Het nummer verwijst naar het nummer van de taak."}
 eerlijk <- data.frame(j = order(unique(toewijzing$j)),
-                      t = t_accent)
-toewijzing %>%
+                      t = t_accent) %>%
+  left_join(data_tijd %>% dplyr::select(teamlid, naam),
+            by = join_by("j" == "teamlid"))
+  
+toewijzing %>% 
+  group_by(naam) %>%
+  mutate(label_y = cumsum(tijdsinvestering)) %>%
   ggplot() +
-  geom_bar(aes(x = as.factor(j), y = tijdsinvestering, fill = as.factor(i)),
+  geom_bar(aes(x = as.factor(naam), y = tijdsinvestering), color = "black", alpha = 0.1,#, fill = as.factor(i)),
            stat = "identity") +
-  geom_point(data = eerlijk, aes(x = as.factor(j), y = t), shape = 8) +
+  geom_point(data = eerlijk, aes(x = as.factor(naam), y = t), shape = 8) +
+  geom_text(aes(y = label_y, label = i, x = as.factor(naam)),
+            vjust = 1.5, colour = "black", size = 2) +
   scale_fill_brewer(name = "taak", palette = "RdYlBu") +
   xlab("teamlid") +
   ylab("tijdsinvestering (dagen)") +
@@ -74,12 +113,15 @@ smin <- sum(slacktabel$s_min)
 splus <- sum(slacktabel$s_plus)
 
 slacktabel %>%
+  left_join(data_tijd %>% dplyr::select(teamlid, naam),
+            by = join_by("j" == "teamlid")) %>%
+  dplyr::select(naam, s_min, s_plus) %>%
   kable("latex",
         booktabs = TRUE,
         caption = "waarde van de slack variabelen",
-        col.names = c("teamlid $j$", "$s^-_j$", "$s^+_j$"),
+        col.names = c("teamlid", "$s^-_j$", "$s^+_j$"),
         escape = FALSE) %>%
   kableExtra::kable_styling()
 ```
 
-Tabel \@ref(tab:{{id}}-slack) toont de waarde van de slack variabelen. Zoals reeds eerder beschreven, $s^-_j >0$ indien teamlid $j$ meer tijd spendeert aan teamtaken dan hij eigenlijk zou moeten. $s^+_j >0$ indien team $j$ minder tijd spendeert aan teamtaken dan hij eigenlijk zou moeten. `r ifelse(round(smin, 5) == round(splus, 5), "De som over alle $s^+_j >0$ is gelijk aan de som over alle $s^-_j >0$. Dit betekent dat er juist even veel teamleden zijn toegewezen aan iedere taak als nodig is (de eerste constraint in formulering \\ref{eq:ip-formulering} is *tight*).", "De som over alle rijen van de tweede kolom is niet gelijk aan de som over alle rijen van de eerste kolom. Dit wil zeggen dat er meer teamleden zijn toegewezen aan sommige taken dan strikt noodzakelijk. Dit fenomeen is mogelijk indien $p_t$ hoog of $p_r$ heel laag gekozen wordt.")`
+Tabel \@ref(tab:{{id}}-slack) toont de waarde van de slack variabelen. Zoals reeds eerder beschreven, $s^-_j >0$ indien teamlid $j$ meer tijd spendeert aan teamtaken dan hij eigenlijk zou moeten. $s^+_j >0$ indien team $j$ minder tijd spendeert aan teamtaken dan hij eigenlijk zou moeten.

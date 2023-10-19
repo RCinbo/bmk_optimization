@@ -1,0 +1,73 @@
+
+### Toewijzing teamleden aan taken
+```{r {{id}}-teamleden-en-taken, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE, include=TRUE}
+get_solution(result, x[i, j]) %>% 
+  dplyr::filter(value == 1) %>%
+  left_join(data_taken, by = c("i" = "taak")) %>%
+  left_join(
+    data_voorkeur %>%
+      pivot_longer(cols = -1, names_to = "j", values_to = "top") %>%
+      mutate(j = as.numeric(j)),
+    by = c("i" = "taak", "j" = "j")) %>%
+  left_join(data_tijd %>% dplyr::select(teamlid, naam),
+            by = join_by("j" == "teamlid")) -> toewijzing
+# toewijzing %>%
+#   mutate(j = sprintf("%i (%i)", j, top)) %>%
+#   group_by(i, beschrijving, tijdsinvestering, personen) %>%
+#   summarize(toewijzing = paste(j, collapse = " & ")) %>%
+#   ungroup() %>%
+#   arrange(i) %>%
+#   dplyr::select(i, beschrijving, tijdsinvestering, toewijzing, personen) %>%
+#   rename(taak = i) %>%
+#   kable(booktabs = TRUE,
+#         caption = "Toewijzing van teamleden aan taken (ranking tussen haakjes)") %>%
+#   kableExtra::kable_styling()
+```
+
+Figuur \@ref(fig:{{id}}-top-toewijzing) toont hoe vaak een keuze uit de top `r gebruikte_top` werd toegewezen, aan welke teamleden en aan welke taak. De rechterfiguur toont de tijdsbesteding per taak op de y-as. Het kan interessant zijn om te kijken of vooral de grote taken terecht komen bij mensen die ook effectief interesse hebben in de taak. De kleuren tonen de verschillende teamleden (hier geanonimiseerd).
+
+```{r {{id}}-top-toewijzing, include = TRUE, eval = TRUE, echo = FALSE, message = FALSE, warning = FALSE, fig.cap = "Ranking van de toegewezen taken bij de voorkeuren van de teamleden. NA wil zeggen dat de taak niet in de top van het teamlid zat en toch togewezen werd."}
+p1 <- toewijzing %>%
+  ggplot() +
+  geom_bar(aes(x = as.factor(top), fill = as.factor(j))) +
+  scale_fill_brewer(name = "teamlid", palette = "Paired", guide = FALSE) +
+  xlab("ranking van de taak die toegewezen werd") +
+  theme_bw()
+# p2 <- toewijzing %>%
+#   ggplot() +
+#   geom_bar(aes(x = as.factor(top), fill = as.factor(i))) +
+#   scale_fill_brewer(name = "taak", palette = palette(gray(seq(0,.9,len = nb_tasks)))) +
+#   xlab("ranking van de taak die toegewezen werd") +
+#   theme_bw()
+p2 <- toewijzing %>%
+  ggplot() +
+  geom_bar(aes(y = tijdsinvestering, x = as.factor(top), fill = as.factor(j)),
+           stat = "identity") +
+  scale_fill_brewer(name = "teamlid", palette = "Paired", guide = FALSE) +
+  xlab("ranking van de taak die toegewezen werd") +
+  theme_bw()
+p1 + p2
+```
+
+### Tijdsbesteding per persoon 
+
+Voor de optimalisatie berekenden we de parameter $t'_{j}$; de tijd die ieder teamlid zou moeten spenderen aan teamtaken voor een eerlijke verdeling. We weten dat, in totaal, $\sum_i t_i*n_i$ dagen aan teamtaken moeten gespendeerd worden in het team. Per persoon komt dat neer op $t'_j = f_j * \frac{\sum_i(t_i*n_i)}{\sum_j f_j}$ dagen waarbij er gecorrigeerd wordt voor teamleden die niet fulltime werken door de parameter $f_j$ (gelijk aan 1 indien teamlid $j$ fulltime werkt en anders $<1$). Figuur \@ref(fig:{{id}}-tijdsbesteding) toont, voor ieder van de teamleden aan welke taken zij hun tijd zullen spenderen en hoe ver zij van hun "eerlijke" tijd verwijderd zitten.
+
+Aangezien sommige teamleden herkenbaar kunnen zijn door hun eerlijke tijdsbesteding, tonen we de totale toegewezen tijdsbesteding, relatief ten opzichte van een eerlijke tijdsbesteding.
+
+
+```{r {{id}}-tijdsbesteding, include = TRUE, eval = TRUE, echo = FALSE, message = FALSE, warning = FALSE, fig.cap = "Tijdsbesteding van ieder teamlid aan teamtaken. De rode horizontale lijn toont een eerlijke tijdsbesteding aan teamtaken voor het teamlid"}
+eerlijk <- data.frame(j = order(unique(toewijzing$j)),
+                      t = t_accent)
+toewijzing %>%
+  left_join(eerlijk) %>%
+  ggplot() +
+  geom_bar(aes(x = as.factor(j), y = tijdsinvestering/t),
+           color = "black", alpha = 0.1,#, fill = as.factor(i)),
+           stat = "identity") +
+  geom_hline(aes(yintercept = 1), color = "red") +
+  scale_fill_brewer(name = "taak", palette = "RdYlBu") +
+  xlab("teamlid") +
+  ylab("tijdsinvestering toewijzing / eerlijke tijdsinvestering") +
+  theme_bw()
+```

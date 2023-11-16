@@ -22,7 +22,7 @@ library(RColorBrewer)
 knitr::opts_chunk$set(echo = TRUE)
 gewicht_geen_top <- 100
 gebruikte_top <- 15
-gewicht_afwijking_tijdsinvestering <- 5 #per dag afwijking
+gewicht_afwijking_tijdsinvestering <- 10 #per dag afwijking
 gewicht_interactie <- data.frame(relatie = c(1, 2, 3),
                                  kost = c(-0.5, -2, -5)) #moet negatief zijn; indien een persoon twee taken die bij elkaar passen doet, krijg je deze 'korting'
 N <- 99999
@@ -218,7 +218,7 @@ if (!is.na(inbo_medewerker)) {
 if (sum(!is.na(data_taken$taak_houden)) > 0) {
   taak <- which(!is.na(data_taken$taak_houden))
   teamlid <- sapply(X = unlist(unname(data_taken[taak, "taak_houden"])),
-                    FUN = function(x) which(data_tijd$teamlid == x))
+                    FUN = function(x) which(data_tijd$naam == x))
   for (z in seq_len(length(taak))) {
     model <- model %>%
       add_constraint(x[i, j] == 1, j = teamlid[z], i = taak[z])
@@ -242,19 +242,6 @@ for (z in seq_len(nrow(data_interactie))) {
   add_constraint(y[z, j] <= x[k, j], j = 1:nb_team)
 }
 
-library(ROI)
-library(ROI.plugin.glpk)
-library(ompr.roi)
-```
-
-```{r optimalisatiesimpler, include = FALSE, eval = FALSE, echo = FALSE}
-#https://www.or-as.be/blog/absolute_value_lp
-#https://www.r-orms.org/mixed-integer-linear-programming/packages/modelling-milp/
-model_simpler <- MIPModel() %>% 
-  add_variable(x[i, j], i = 1:nb_tasks, j = 1:nb_team, type = "binary") %>% 
-  set_objective(sum_expr(w[i, j] * x[i, j], i = 1:nb_tasks, j = 1:nb_team), 
-                sense = "min") %>% 
-  add_constraint(sum_expr(x[i, j], j = 1:nb_team) >= n[i], i = 1:nb_tasks)
 library(ROI)
 library(ROI.plugin.glpk)
 library(ompr.roi)
@@ -292,161 +279,7 @@ cat(
   ))
 ```
 
-Aangezien er een grote afwijking is van een eerlijke tijdsverdeling, maken we de kost voor deze afwijking $p_t$ hoger. We hopen dat er niet te veel taken met lagere voorkeur worden toegewezen en we toch een gebalanceerder resultaat krijgen qua tijdsbesteding.
-
-\clearpage
-
-## Een eerste alternatief met een hogere kost voor afwijkingen in tijdsbestedingen
-De eerste oplossing toont dat er slechts 4 taken worden toegewezen aan teamleden die deze taak niet in hun top `r gebruikte_top` hadden staat. Het betreft een taak die door 9/10 teamleden MOET uitgevoerd worden. Dit is dus niet zo verwonderlijk. 
-
-In de resultaten hieronder kiezen we $p_t = 10$ in plaats van $p_t = 5$. Hierdoor verwachten we dat de verdeling in tijdsbestedingen eerlijker is maar misschien verliezen we daardoor wel wat op vlak van voorkeuren.
-
-
-```{r echo=FALSE, warning = FALSE, include = FALSE}
-gewicht_afwijking_tijdsinvestering <- 10
-model <- MIPModel() %>% 
-  add_variable(x[i, j], i = 1:nb_tasks, j = 1:nb_team, type = "binary") %>% 
-  add_variable(y[r, j], r = 1:nb_interactie, j = 1:nb_team, type = "binary") %>%
-  add_variable(s_min[j], j = 1:nb_team, type = "continuous", lb = 0) %>% 
-  add_variable(s_plus[j], j = 1:nb_team, type = "continuous", lb = 0) %>% 
-  set_objective(sum_expr(w[i, j] * x[i, j], i = 1:nb_tasks, j = 1:nb_team) +
-                  gewicht_afwijking_tijdsinvestering *
-                  sum_expr(s_min[j], j = 1:nb_team) +
-                  gewicht_afwijking_tijdsinvestering *
-                  sum_expr(s_plus[j], j = 1:nb_team) +
-                  sum_expr(p_r[r] * sum_expr(y[r, j], j = 1:nb_team),
-                           r = 1:nb_interactie),
-                sense = "min") %>% 
-  add_constraint(sum_expr(x[i, j], j = 1:nb_team) >= n[i], i = 1:nb_tasks) %>% 
-  add_constraint(sum_expr(x[i, j], j = 1:nb_team) <= n[i], i = 1:nb_tasks) %>% 
-  add_constraint(t_accent[j] - sum_expr(t[i] * x[i, j], i = 1:nb_tasks)
-                 <= s_plus[j], j = 1:nb_team) %>% 
-  add_constraint(sum_expr(t[i] * x[i, j], i = 1:nb_tasks) - t_accent[j]
-                 <= s_min[j], j = 1:nb_team)
-if (!is.na(evinbo_medewerker)) {
-  evinbo_taken <- which(data_taken$beschrijving %in% evinbo_medewerker)
-  evinbo_medewerkers <- which(data_tijd$EVINBO == 1)
-  model <- model %>%
-    add_constraint(sum_expr(x[i, j], j = evinbo_medewerkers) >= n[i],
-                   i = evinbo_taken) 
-}
-if (!is.na(inbo_medewerker)) {
-  inbo_taken <- which(data_taken$beschrijving %in% inbo_medewerker)
-  inbo_medewerkers <- which(data_tijd$EVINBO == 0)
-  model <- model %>%
-    add_constraint(sum_expr(x[i, j], j = inbo_medewerkers) >= n[i],
-                   i = inbo_taken) 
-}
-if (sum(!is.na(data_taken$taak_houden)) > 0) {
-  taak <- which(!is.na(data_taken$taak_houden))
-  teamlid <- sapply(X = unlist(unname(data_taken[taak, "taak_houden"])),
-                    FUN = function(x) which(data_tijd$teamlid == x))
-  for (z in seq_len(length(taak))) {
-    model <- model %>%
-      add_constraint(x[i, j] == 1, j = teamlid[z], i = taak[z])
-  }
-}
-#beperking voor taken die niet door dezelfde persoon mogen uitgevoerd worden
-for (z in seq_len(nrow(data_mag_niet))) {
-  l <- as.numeric(unlist(data_mag_niet[z, "taak_1_nr"]))
-  k <- as.numeric(unlist(data_mag_niet[z, "taak_2_nr"]))
-  model <- model %>%
-  add_constraint(x[l, j] <= 1 - x[k, j], j = 1:nb_team)
-}
-
-#beperking voor taken die best wel door dezelfde persoon uitgevoerd worden
-for (z in seq_len(nrow(data_interactie))) {
-  l <- as.numeric(unlist(data_interactie[z, "taak_1_nr"]))
-  k <- as.numeric(unlist(data_interactie[z, "taak_2_nr"]))
-  model <- model %>%
-  add_constraint(y[z, j] >= -1 + x[l, j] + x[k, j], j = 1:nb_team) %>%
-  add_constraint(y[z, j] <= x[l, j], j = 1:nb_team) %>%
-  add_constraint(y[z, j] <= x[k, j], j = 1:nb_team)
-}
-result <- model %>% 
-  solve_model(with_ROI("glpk", verbose = TRUE))
-id <- "alternatief"
-```
-
-```{r echo=FALSE, results='asis', eval = !params$anoniem}
-cat(
-  knitr::knit(text = knitr::knit_expand('_MIP_resultaat.Rmd',
-                                        envir = environment(), quiet = TRUE),
-              quiet = TRUE
-  ))
-```
-
-```{r echo=FALSE, results='asis', eval = params$anoniem}
-cat(
-  knitr::knit(text = knitr::knit_expand('_MIP_resultaat_anoniem.Rmd',
-                                        envir = environment(), quiet = TRUE),
-              quiet = TRUE
-  ))
-```
-
-Dit resultaat ziet er al iets beter uit. We lijken niet al te veel te verliezen op vlak van voorkeuren en de tijdsbesteding is gebalanceerder. We gaan na of we dit eventueel nog kunnen verbeteren.
-
-\clearpage
-
-## Een tweede alternatief met een extra beperking
-Er zat een fout in de data: de taak "Comissie voor wetenschappelijke integriteit" moet bij Hans blijven; we voegen de beperking $x_ij \geq 1$ toe om dit op te leggen. 
-
-```{r echo=FALSE, warning = FALSE, include = FALSE}
-result <- model %>% 
-  add_constraint(x[i, j] >= 1, i = 14, j = 3) %>%
-  solve_model(with_ROI("glpk", verbose = TRUE))
-id <- "alternatiefa"
-```
-
-
-```{r echo=FALSE, results='asis', eval = !params$anoniem}
-cat(
-  knitr::knit(text = knitr::knit_expand('_MIP_resultaat.Rmd',
-                                        envir = environment(), quiet = TRUE),
-              quiet = TRUE
-  ))
-```
-
-```{r echo=FALSE, results='asis', eval = params$anoniem}
-cat(
-  knitr::knit(text = knitr::knit_expand('_MIP_resultaat_anoniem.Rmd',
-                                        envir = environment(), quiet = TRUE),
-              quiet = TRUE
-  ))
-```
-
-\clearpage
-
-## Een derde alternatief
-
-De resultaten hieronder beschrijven de resultaten waarbij $s^-_4<1.5$ en $s^-_1<1.5$ toegevoegd wordt aan het model. Hoewel de tijdsbesteding nu behoorlijk gebalanceerd is, zien we dat er iemand een heel grote taak krijgt toegewezen die niet meer in zijn/haar top 15 staat. Dit lijkt op deze manier een straatje zonder einde. 
-
-```{r echo=FALSE, warning = FALSE, include = FALSE}
-result <- model %>% 
-  add_constraint(s_min[j] <= 1.5, j = 4) %>%
-  add_constraint(s_min[j] <= 1.5, j = 1) %>%
-  solve_model(with_ROI("glpk", verbose = TRUE))
-id <- "alternatiefb"
-```
-
-
-```{r echo=FALSE, results='asis', eval = !params$anoniem}
-cat(
-  knitr::knit(text = knitr::knit_expand('_MIP_resultaat.Rmd',
-                                        envir = environment(), quiet = TRUE),
-              quiet = TRUE
-  ))
-```
-
-```{r echo=FALSE, results='asis', eval = params$anoniem}
-cat(
-  knitr::knit(text = knitr::knit_expand('_MIP_resultaat_anoniem.Rmd',
-                                        envir = environment(), quiet = TRUE),
-              quiet = TRUE
-  ))
-```
-
 
 # Conclusie
 
-Na nog enkele extra testen (kosten wijzigen, beperkingen toevoegen, doelfunctie aanpassen,...) is het duidelijke dat er een keuze gemaakt moet worden tussen een licht ongebalanceerde tijdsbesteding (beste lijkt eerste alternatief) of een grote taak aan iemand toewijzen die de taak niet in zijn/haar top 15 had gezet (Derde alternatief). Waar geven we de voorkeur aan? 
+Iedereen is akkoord met deze toewijzing. 

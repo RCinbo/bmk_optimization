@@ -51,7 +51,7 @@ p1 + p2
 
 ### Tijdsbesteding per persoon 
 
-Voor de optimalisatie berekenden we de parameter $t'_{j}$; de tijd die ieder teamlid zou moeten spenderen aan teamtaken voor een eerlijke verdeling. We weten dat, in totaal, $\sum_i t_i*n_i$ dagen aan teamtaken moeten gespendeerd worden in het team. Per persoon komt dat neer op $t'_j = f_j * \frac{\sum_i(t_i*n_i)}{\sum_j f_j}$ dagen waarbij er gecorrigeerd wordt voor teamleden die niet fulltime werken door de parameter $f_j$ (gelijk aan 1 indien teamlid $j$ fulltime werkt en anders $<1$). Figuur \@ref(fig:{{id}}-tijdsbesteding) toont, voor ieder van de teamleden aan welke taken zij hun tijd zullen spenderen en hoe ver zij van hun "eerlijke" tijd verwijderd zitten.
+Voor de optimalisatie berekenden we de parameter $t'_{j}$; de tijd die ieder teamlid zou moeten spenderen aan teamtaken voor een eerlijke verdeling. We weten dat, in totaal, $\sum_i t_i*n_i$ dagen aan teamtaken moet gespendeerd worden in het team. Per persoon komt dat neer op $t'_j = f_j * \frac{\sum_i(t_i*n_i)}{\sum_j f_j}$ dagen waarbij er gecorrigeerd wordt voor teamleden die niet fulltime werken door de parameter $f_j$ (gelijk aan 1 indien teamlid $j$ fulltime werkt en anders $<1$). Figuur \@ref(fig:{{id}}-tijdsbesteding) toont, voor ieder van de teamleden, aan hoeveel taken zij hun tijd zullen spenderen en hoe ver zij van hun "eerlijke" tijd verwijderd zitten.
 
 Aangezien sommige teamleden herkenbaar kunnen zijn door hun eerlijke tijdsbesteding, tonen we de totale toegewezen tijdsbesteding, relatief ten opzichte van een eerlijke tijdsbesteding.
 

@@ -22,7 +22,7 @@ library(RColorBrewer)
 knitr::opts_chunk$set(echo = TRUE)
 gewicht_geen_top <- 100
 gebruikte_top <- 15
-gewicht_afwijking_tijdsinvestering <- 5
+gewicht_afwijking_tijdsinvestering <- 5 #per dag afwijking
 gewicht_interactie <- data.frame(relatie = c(1, 2, 3),
                                  kost = c(-0.5, -2, -5)) #moet negatief zijn; indien een persoon twee taken die bij elkaar passen doet, krijg je deze 'korting'
 N <- 99999
@@ -67,7 +67,8 @@ intop <- function(x) {
 data_voorkeur2 <- data_voorkeur %>%
   mutate(across(-taak, intop))
 #Deze taak moet door bijna iedereen gedaan worden. Als ze het niet in hun top 15 hebben staan, zet ik het op de 16de plaats.
-data_voorkeur2[16, which(is.na(data_voorkeur2[16, ]))] <- data_voorkeur[16, which(is.na(data_voorkeur2[16, ]))]
+data_voorkeur2[16, which(is.na(data_voorkeur2[16, ]))] <-
+  data_voorkeur[16, which(is.na(data_voorkeur2[16, ]))]
 data_voorkeur <- data_voorkeur2
 w <- as.matrix(data_voorkeur[, -1])
 w[is.na(w)] <- gewicht_geen_top
@@ -141,7 +142,7 @@ s.t. & \\
  & \sum_{j \in \Lambda_I} x_{ij} \geq n_i &\forall i \in \Theta_I\\
  & \sum_{j \in \Lambda_E} x_{ij} \geq n_i &\forall i \in \Theta_E\\
  & x_{i\in fav(j), j} = 1 &\forall j\\
- & x_{i_1, j} \leq 1 -  x_{i_1, j} &\forall j, \forall i_1, i_2 \in \Phi_{-1}\\
+ & x_{i_1, j} \leq 1 -  x_{i_2, j} &\forall j, \forall i_1, i_2 \in \Phi_{-1}\\
  & y_r \geq - 1 + x_{i_1, j} + x_{i_2, j} &\forall j, \forall r, i_1, i_2 \in \Phi_{+}\\
  & y_r \leq x_{i_1, j} &\forall j, \forall r, i_1 \in \Phi_{+}\\
  & y_r \leq x_{i_2, j} &\forall j, \forall r, i_2 \in \Phi_{+}\\\\
@@ -268,7 +269,7 @@ In deze sectie beschrijven we de startoplossing. Deze oplossing is optimaal in h
 - Kost voor een toewijzing buiten de top: `r gewicht_geen_top`
 - Grootte van de gebruikte top: `r gebruikte_top`
 - Kost voor een dag afwijking (positief of negatief) van een eerlijke tijdsinvestering: `r gewicht_afwijking_tijdsinvestering`
-- Beloning om taken met een interactie van respectievelijk typetoe te wijzen aan dezelfde persoon: `r str_c(-1*(gewicht_interactie$kost), collapse = ", ")`
+- Beloning om taken met een interactie van respectievelijk type 1, 2, of 3 toe te wijzen aan dezelfde persoon: `r str_c(-1*(gewicht_interactie$kost), collapse = ", ")`
 
 
 `r ifelse(params$anoniem, "Aangezien we hier naar de geanonimiseerde data kijken, tonen we de toewijzing van taken aan personen niet. We bekijken wel de ranking van de taken die toegewezen werden en hoe eerlijk de tijdsbesteding is.", "")`
@@ -388,16 +389,15 @@ Dit resultaat ziet er al iets beter uit. We lijken niet al te veel te verliezen 
 \clearpage
 
 ## Een tweede alternatief met een extra beperking
-We zien dat teamlid 6 wat minder moet presteren en een teamlid 4 meer dan een eerlijke toewijzing zou voorschrijven. 
-
-De resultaten hieronder beschrijven de resultaten waarbij $s^-_4<1.5$ toegevoegd wordt aan het model om er voor te zorgen dat dit teamlid minder tijd moet besteden aan teamtaken dan in de vorige oplossing. 
+Er zat een fout in de data: de taak "Comissie voor wetenschappelijke integriteit" moet bij Hans blijven; we voegen de beperking $x_ij \geq 1$ toe om dit op te leggen. 
 
 ```{r echo=FALSE, warning = FALSE, include = FALSE}
 result <- model %>% 
-  add_constraint(s_min[j] <= 1.5, j = 4) %>%
+  add_constraint(x[i, j] >= 1, i = 14, j = 3) %>%
   solve_model(with_ROI("glpk", verbose = TRUE))
 id <- "alternatiefa"
 ```
+
 
 ```{r echo=FALSE, results='asis', eval = !params$anoniem}
 cat(
@@ -446,6 +446,7 @@ cat(
   ))
 ```
 
+
 # Conclusie
 
-Na nog enkele extra testen (kosten wijzigen, beperkingen toevoegen,...) is het duidelijke dat er een keuze gemaakt moet worden tussen een licht ongebalanceerde tijdsbesteding (beste lijkt eerste alternatief) of een grote taak aan iemand toewijzen die de taak niet in zijn/haar top 15 had gezet (Derde alternatief). Waar geven we de voorkeur aan? 
+Na nog enkele extra testen (kosten wijzigen, beperkingen toevoegen, doelfunctie aanpassen,...) is het duidelijke dat er een keuze gemaakt moet worden tussen een licht ongebalanceerde tijdsbesteding (beste lijkt eerste alternatief) of een grote taak aan iemand toewijzen die de taak niet in zijn/haar top 15 had gezet (Derde alternatief). Waar geven we de voorkeur aan? 

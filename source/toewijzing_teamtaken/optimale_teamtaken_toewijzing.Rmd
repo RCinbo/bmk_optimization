@@ -77,8 +77,6 @@ n <- as.numeric(unlist(data_taken$personen))
 t_accent <- sum(t*n) / sum(data_tijd$tijdsinvestering) *
   as.numeric(unlist(data_tijd$tijdsinvestering))
 p_r <- as.numeric(unlist(data_interactie$kost))
-
-
 ```
 
 # Inleiding
@@ -93,7 +91,7 @@ Allereerst wordt er een lijst gemaakt van alle taken die momenteel door teamlede
 
 ```{r taken, echo=FALSE}
 data_taken %>%
-  dplyr::select(-`uitgebreide_taakbeschrijving`, -taak_houden) %>%
+  dplyr::select(-`uitgebreide_taakbeschrijving`, -taak_houden, -backup) %>%
   kable("latex",
         booktabs = T,
         caption = "Overzicht van de taken",
@@ -251,7 +249,7 @@ library(ompr.roi)
 
 ## Een startoplossing
 
-In deze sectie beschrijven we de startoplossing. Deze oplossing is optimaal in het MIP model (formulering \@ref(eq:ip-formulering)). Hoewel de oplossing optimaal is, is het mogelijk dat er toch een onevenwicht is dat bijgesteld moet worden. De waardes van de verschillende kostenparameters zijn:
+In deze sectie beschrijven we de startoplossing. Deze oplossing is optimaal in het MILP model (formulering \@ref(eq:ip-formulering)). Hoewel de oplossing optimaal is, is het mogelijk dat er toch een onevenwicht is dat bijgesteld moet worden. De waardes van de verschillende kostenparameters zijn:
 
 - Kost voor een toewijzing buiten de top: `r gewicht_geen_top`
 - Grootte van de gebruikte top: `r gebruikte_top`
@@ -283,7 +281,162 @@ cat(
   ))
 ```
 
+Toon Van Dale en Toon Westra komen overeen dat zij taak 36 (HWG Klimaat) en taak 35 (aanspreekpunt beleidsdocumenten) zullen switchen.
+
+```{r echo=FALSE}
+klimaat <- which(toewijzing$i == 36)
+toewijzing[klimaat, c("j", "naam")] <-
+  unlist(data_tijd[data_tijd$naam == "Toon VD", c("teamlid", "naam")])
+beleid <- which(toewijzing$i == 35)
+toewijzing[beleid, c("j", "naam")] <-
+  unlist(data_tijd[data_tijd$naam == "Toon W", c("teamlid", "naam")])
+```
+
+
+## Toewijzing backups
+
+We stellen een nieuw MILP op voor de toewijzing van backup rollen. In deze formulering wordt de toewijzing van de taken meegenomen. We gaan er van uit dat dezelfde voorkeuren voor de backup rollen gelden als voor de teamtaken zelf.
+
+\begin{equation} 
+\begin{aligned}
+min & \sum_{b, j}(w_{bj} * x_{bj}) + p_t * \sum_{j}(s^{-}_{j} +  s^{+}_{j}) \\
+s.t. & \\
+ & \sum_j x_{bj} = n_b &\forall i\\
+ & t^{'}_{b} - \sum_b(x_{bj})  \leq s^{+}_{j} & \forall j\\
+ & \sum_b(x_{bj}) - t^{'}_{j} \leq  s^{-}_{j} & \forall j\\
+ & x_{bj} < 1 - x_{ij} &\forall b=i, j\\
+ & x_{b\in fav(j), j} = 1 &\forall j\\
+ & x_{bj}, \in \{0, 1\} & \forall b, j\\
+ & s^{+}_{j}, s^{-}_{j} \in \mathbb{R}^{+} & \forall j
+\end{aligned}
+(\#eq:ip-formulering-backup)
+\end{equation} 
+
+met $x_{bj} = 1$ indien backup taak $b$ aan teamlid $j$ wordt toegewezen en anders $x_{bj} = 0$. We minimaliseren de ranking en de afwijking ten opzichte van een eerlijke verdeling.
+
+- in de doelfunctie wordt de ranking en de afwijking ten opzicht van een eerlijke verdeling van backup taken geminimaliseerd.
+- De eerste beperking eist dat backup taak $b$ aan exact $n_b$ personen wordt toegewezen.
+- De tweede en derde beperken zorgen er voor dat $s^{+}_{j}$ en $s^{-}_{j}$ de afwijking ten opzicht van een eerlijke verdeling weerspiegelen voor iedere medewerker. $t^{'}_{b} = \frac{\sum_b n_b}{\text{aantal teamleden}}$; we gaan er dus van uit dat iedere backup taak ongeveer even veel tijd vraagt aan het verantwoordelijke teamlid.
+- De vierde beperking zorgt er voor dat backup taak $b$ niet toegewezen wordt aan het teamlid dat de hoofdverantwoordelijkheid voor deze taak draagt.
+- De vijfde beperking laat toe om een taak rechtstreeks aan één teamlid toe  te wijzen; bijvoorbeeld omdat deze backup rol goed bij zijn takenpakket past.
+- De laatste beperkingen definiëren de beslissingsvariabelen.
+
+
+```{r echo=FALSE}
+data_backup <- data_taken %>%
+  filter(!is.na(backup))
+
+#we gebruiken alle voorkeuren, niet alleen de top 15
+data_voorkeur <- readxl::read_excel(path = bron,
+                                 sheet = "voorkeuren",
+                                 skip = 1) %>%
+  filter(taak %in% data_backup$taak)
+
+nb_backup <- nrow(data_backup)
+gewicht_afwijking_tijdsinvestering <- 15
+n <- as.numeric(data_backup$backup)
+n[is.na(n)] <- 1#if a name was filled in, it needs to be done by one person.
+w <- data_voorkeur %>% dplyr::select(-1) %>% as.matrix()
+t_accent <- rep(sum(n)/nb_team, nb_backup)
+x_toewijzing <- get_solution(result, x[i, j]) %>%
+  dplyr::filter(i %in% data_backup$taak) %>%
+  dplyr::select(-variable) %>%
+  arrange(j) %>%
+  pivot_wider(names_from = j,
+              values_from = value) %>%
+  dplyr::select(-i) %>%
+  as.matrix()
+```
+
+```{r optimalisatie-backup, include = FALSE, eval = TRUE, echo = FALSE}
+#https://www.or-as.be/blog/absolute_value_lp
+#https://www.r-orms.org/mixed-integer-linear-programming/packages/modelling-milp/
+model <- MIPModel() %>% 
+  add_variable(x[b, j], b = 1:nb_backup, j = 1:nb_team, type = "binary") %>% 
+  add_variable(s_min[j], j = 1:nb_team, type = "continuous", lb = 0) %>% 
+  add_variable(s_plus[j], j = 1:nb_team, type = "continuous", lb = 0) %>% 
+  set_objective(sum_expr(w[b, j] * x[b, j], b = 1:nb_backup, j = 1:nb_team) +
+                  gewicht_afwijking_tijdsinvestering *
+                  sum_expr(s_min[j], j = 1:nb_team) +
+                  gewicht_afwijking_tijdsinvestering *
+                  sum_expr(s_plus[j], j = 1:nb_team),
+                sense = "min") %>% 
+  add_constraint(sum_expr(x[b, j], j = 1:nb_team) >= n[b], b = 1:nb_backup) %>% 
+  add_constraint(sum_expr(x[b, j], j = 1:nb_team) <= n[b], b = 1:nb_backup) %>% 
+  add_constraint(x[b, j] <= 1 - x_toewijzing[b, j], b = 1:nb_backup,
+                j = 1:nb_team) %>% 
+  add_constraint(t_accent[j] - sum_expr(x[b, j], b = 1:nb_backup)
+                 <= s_plus[j], j = 1:nb_team) %>% 
+  add_constraint(sum_expr(x[b, j], b = 1:nb_backup) - t_accent[j]
+                 <= s_min[j], j = 1:nb_team)
+
+if (sum(!is.na(as.numeric(data_backup$backup))) > 0) {
+  taak_row <- which(is.na(as.numeric(data_backup$backup)))
+  teamlid <- sapply(X = unlist(unname(data_backup[taak_row, "backup"])),
+                    FUN = function(x) which(data_tijd$naam == x))
+  for (z in seq_len(length(taak_row))) {
+    model <- model %>%
+      add_constraint(x[b, j] == 1, j = unname(teamlid[z]), b = taak_row[z])
+  }
+}
+
+result_backup <- model %>% 
+  solve_model(with_ROI("glpk", verbose = TRUE))
+
+assign_backup <- get_solution(result_backup, x[b, j]) %>%
+  filter(value == 1) %>%
+  dplyr::select(-variable, -value) %>%
+  rename(assigned_backup = j)
+data_backup <- data_backup %>%
+  mutate(backup_nb = 1:nb_backup) %>%
+  left_join(assign_backup, by = c("backup_nb" = "b")) %>%
+  left_join(data_tijd %>% dplyr::select(teamlid, naam),
+             by = c("assigned_backup" = "teamlid")) %>%
+  rename(naam_backup = naam)
+```
+
+```{r optimalisatie-backup-tabel, include = TRUE, eval = TRUE, echo = FALSE}
+data_backup %>%
+  dplyr::select(beschrijving, backup, naam_backup) %>%
+  kable(booktabs = TRUE, 
+    caption = "overzicht van de backup toewijzing"
+  ) %>%
+  kableExtra::kable_styling()
+```
+
+```{r optimalisatie-backup-verdeling, include = TRUE, eval = TRUE, echo = FALSE}
+data_backup %>%
+  group_by(naam_backup) %>%
+  summarize(aantal_backup_rollen = n()) %>%
+  kable(booktabs = TRUE, 
+    caption = "aantal backup rollen per teamlid"
+  ) %>%
+  kableExtra::kable_styling()
+  
+```
+
+```{r write-toewijzing, include = TRUE, eval = TRUE, echo = FALSE}
+toewijzing_backups <- data_backup %>%
+  left_join(data_voorkeur %>%
+      pivot_longer(cols = -1, names_to = "j", values_to = "top") %>%
+      mutate(j = as.numeric(j)),
+    by = c("taak" = "taak", "assigned_backup" = "j")) %>%
+  mutate(naamvoorkeur = sprintf("%s (%d)", naam_backup, top)) %>%
+  group_by(taak) %>%
+  summarize(toewijzing_backup = paste(naamvoorkeur, collapse = ", "))
+    
+toewijzing <- toewijzing %>%
+  left_join(toewijzing_backups, by = c("i" = "taak"))
+# do::write_xlsx(toewijzing,
+#                file = bron,
+#                append = TRUE,
+#                sheet = "toewijzing",
+#                col.names = TRUE,
+#                overwrite = TRUE
+#                )
+```
 
 # Conclusie
+
 
 Iedereen is akkoord met deze toewijzing. 

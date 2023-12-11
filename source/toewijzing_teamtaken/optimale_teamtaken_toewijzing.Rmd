@@ -427,13 +427,13 @@ toewijzing_backups <- data_backup %>%
     
 toewijzing <- toewijzing %>%
   left_join(toewijzing_backups, by = c("i" = "taak"))
-# do::write_xlsx(toewijzing,
-#                file = bron,
-#                append = TRUE,
-#                sheet = "toewijzing",
-#                col.names = TRUE,
-#                overwrite = TRUE
-#                )
+do::write_xlsx(toewijzing,
+               file = bron,
+               append = TRUE,
+               sheet = "toewijzing",
+               col.names = TRUE,
+               overwrite = TRUE
+               )
 ```
 
 # Conclusie

@@ -1,0 +1,28 @@
+..generic:
+  git2rdata: 0.4.0
+  optimize: yes
+  NA string: NA
+  hash: a8f69bf52c917fa594a6f79c9a9ebf6a5c1d2949
+  data_hash: 7fb6e27078cd83c767f7b971d9dbd4ed1b817ad3
+taak:
+  class: numeric
+'1':
+  class: numeric
+'2':
+  class: numeric
+'3':
+  class: numeric
+'4':
+  class: numeric
+'5':
+  class: numeric
+'6':
+  class: numeric
+'7':
+  class: numeric
+'8':
+  class: numeric
+'9':
+  class: numeric
+'10':
+  class: numeric

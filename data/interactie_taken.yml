@@ -1,0 +1,18 @@
+..generic:
+  git2rdata: 0.4.0
+  optimize: yes
+  NA string: NA
+  hash: 5fe14ec33abc56af7c7e2132e9b211b04cd70c69
+  data_hash: dfb8409a6c32540030e4d3396601bde8ba969801
+taak_1_beschrijving:
+  class: character
+taak_2_beschrijving:
+  class: character
+relatie:
+  class: numeric
+taak_1_nr:
+  class: numeric
+taak_2_nr:
+  class: numeric
+kost:
+  class: numeric

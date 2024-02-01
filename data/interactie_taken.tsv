@@ -1,0 +1,9 @@
+taak_1_beschrijving	taak_2_beschrijving	relatie	taak_1_nr	taak_2_nr	kost
+Verlofgoedkeuring voor team	Verlofgoedkeuring voor verlofgoedkeurder	-1	20	21	NA
+Trekken van kennisdeling binnen team	Bijdragen aan kennisdeling binnen team	-1	15	16	NA
+Voorbereiding en voorzitten teamevaluatie	Verslaggeving teamevaluatie	-1	22	23	NA
+Synchronisatie en aanmaken projectopvolgingstabel	Voorbereiding en voorzitten teamevaluatie	1	1	22	-0.5
+Verslaggeving teamevaluatie	Voorbereiding en voorzitten teamevaluatie	-1	23	22	NA
+Administratie rond teamevaluatie	Voorbereiding en voorzitten teamevaluatie	3	24	22	-5
+Synchronisatie en aanmaken projectopvolgingstabel	Administratie rond teamevaluatie	2	1	24	-2
+Praktische organisatie, ondersteuning en administratie van de planning	Coördineren van de planning	-1	4	7	NA

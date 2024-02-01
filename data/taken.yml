@@ -1,0 +1,20 @@
+..generic:
+  git2rdata: 0.4.0
+  optimize: yes
+  NA string: NA
+  hash: 0a3a6252abcb671af30c7b165f236ab5f67684c0
+  data_hash: be5df94098bff32cf8960aa78ed6c3200b626187
+taak:
+  class: numeric
+beschrijving:
+  class: character
+tijdsinvestering:
+  class: numeric
+personen:
+  class: numeric
+taak_houden:
+  class: character
+uitgebreide_taakbeschrijving:
+  class: character
+backup:
+  class: character

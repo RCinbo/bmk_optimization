@@ -1,0 +1,14 @@
+..generic:
+  git2rdata: 0.4.0
+  optimize: yes
+  NA string: NA
+  hash: fc4b35deea1444c7a1e89d0743f5f9bdd0dd812e
+  data_hash: 77d7160b42bcb57ed6d1ece506de4a330c9acfcc
+teamlid:
+  class: numeric
+tijdsinvestering:
+  class: numeric
+EVINBO:
+  class: numeric
+naam:
+  class: character
